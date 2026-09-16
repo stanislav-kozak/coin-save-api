@@ -1,0 +1,28 @@
+# Локальні специфікації — не в git
+docs/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Prisma
+prisma/*.db
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Test coverage
+coverage/
