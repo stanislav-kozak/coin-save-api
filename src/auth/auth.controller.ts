@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -12,6 +22,8 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
+import { AppException } from '../common/exceptions/app.exception';
+import { ERROR_CODES } from '../common/constants/error-codes';
 
 const ACCESS_COOKIE = 'access';
 const REFRESH_COOKIE = 'refresh';
@@ -59,8 +71,11 @@ export class AuthController {
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<{ message: string }> {
-    const refreshToken = req.cookies?.[REFRESH_COOKIE];
+  async logout(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ message: string }> {
+    const refreshToken = this.extractRefreshToken(req);
     if (refreshToken) {
       await this.authService.logout(refreshToken);
     }
@@ -71,12 +86,26 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<{ message: string }> {
-    const presented = req.cookies?.[REFRESH_COOKIE] ?? req.body?.refreshToken;
-    const { accessToken, refreshToken } = await this.authService.refresh(presented, {
-      userAgent: req.headers['user-agent'],
-      ipAddress: req.ip,
-    });
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ message: string }> {
+    const presented = this.extractRefreshToken(req);
+    if (!presented) {
+      throw new AppException(
+        ERROR_CODES.INVALID_REFRESH_TOKEN,
+        HttpStatus.UNAUTHORIZED,
+        'Invalid refresh token',
+      );
+    }
+
+    const { accessToken, refreshToken } = await this.authService.refresh(
+      presented,
+      {
+        userAgent: req.headers['user-agent'],
+        ipAddress: req.ip,
+      },
+    );
     this.setAuthCookies(res, accessToken, refreshToken);
     return { message: 'Refreshed' };
   }
@@ -109,7 +138,9 @@ export class AuthController {
   @Post('request-password-reset')
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.OK)
-  async requestPasswordReset(@Body() dto: RequestPasswordResetDto): Promise<{ message: string }> {
+  async requestPasswordReset(
+    @Body() dto: RequestPasswordResetDto,
+  ): Promise<{ message: string }> {
     await this.authService.requestPasswordReset(dto.email);
     return { message: 'If the email exists, a reset link was sent' };
   }
@@ -117,12 +148,28 @@ export class AuthController {
   @Post('reset-password')
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.OK)
-  async resetPassword(@Body() dto: ResetPasswordDto): Promise<{ message: string }> {
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+  ): Promise<{ message: string }> {
     await this.authService.resetPassword(dto.token, dto.newPassword);
     return { message: 'Password reset' };
   }
 
-  private setAuthCookies(res: Response, accessToken: string, refreshToken: string): void {
+  private extractRefreshToken(req: Request): string | undefined {
+    const cookies = req.cookies as Record<string, string> | undefined;
+    const fromCookie = cookies?.[REFRESH_COOKIE];
+    if (fromCookie) {
+      return fromCookie;
+    }
+    const body = req.body as { refreshToken?: string } | undefined;
+    return body?.refreshToken;
+  }
+
+  private setAuthCookies(
+    res: Response,
+    accessToken: string,
+    refreshToken: string,
+  ): void {
     res.cookie(ACCESS_COOKIE, accessToken, {
       httpOnly: true,
       secure: true,

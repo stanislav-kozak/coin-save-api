@@ -22,6 +22,8 @@ describe('UsersService', () => {
     const result = await service.findByEmail('a@b.com');
 
     expect(result).toBe(found);
-    expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { email: 'a@b.com' } });
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({
+      where: { email: 'a@b.com' },
+    });
   });
 });

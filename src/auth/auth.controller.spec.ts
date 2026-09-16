@@ -1,4 +1,8 @@
-import { ExecutionContext, INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  ExecutionContext,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AuthController } from './auth.controller';
@@ -11,7 +15,10 @@ describe('AuthController', () => {
   let app: INestApplication;
   const authService = {
     signup: vi.fn().mockResolvedValue(undefined),
-    login: vi.fn().mockResolvedValue({ accessToken: 'access-token', refreshToken: 'refresh-token' }),
+    login: vi.fn().mockResolvedValue({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+    }),
   };
   const usersService = { findById: vi.fn() };
 
@@ -26,7 +33,7 @@ describe('AuthController', () => {
       .overrideGuard(LocalAuthGuard)
       .useValue({
         canActivate: (context: ExecutionContext) => {
-          const req = context.switchToHttp().getRequest();
+          const req = context.switchToHttp().getRequest<{ user?: unknown }>();
           req.user = { id: 'u1', email: 'a@b.com' };
           return true;
         },
@@ -36,7 +43,9 @@ describe('AuthController', () => {
       .compile();
 
     app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
   });
 
@@ -68,6 +77,8 @@ describe('AuthController', () => {
 
     const cookies = res.headers['set-cookie'] as unknown as string[];
     expect(cookies.some((c) => c.startsWith('access=access-token'))).toBe(true);
-    expect(cookies.some((c) => c.startsWith('refresh=refresh-token'))).toBe(true);
+    expect(cookies.some((c) => c.startsWith('refresh=refresh-token'))).toBe(
+      true,
+    );
   });
 });

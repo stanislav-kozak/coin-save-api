@@ -5,11 +5,15 @@ interface RequestWithSpaceId {
   body?: { spaceId?: string };
 }
 
-export function extractSpaceId(request: RequestWithSpaceId): string | undefined {
+export function extractSpaceId(
+  request: RequestWithSpaceId,
+): string | undefined {
   return request.params.spaceId ?? request.body?.spaceId;
 }
 
-export const Space = createParamDecorator((_: unknown, ctx: ExecutionContext): string | undefined => {
-  const request = ctx.switchToHttp().getRequest();
-  return extractSpaceId(request);
-});
+export const Space = createParamDecorator(
+  (_: unknown, ctx: ExecutionContext): string | undefined => {
+    const request = ctx.switchToHttp().getRequest<RequestWithSpaceId>();
+    return extractSpaceId(request);
+  },
+);

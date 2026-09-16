@@ -1,18 +1,19 @@
-import { CanActivate, ExecutionContext, HttpStatus, Injectable } from '@nestjs/common';
-import { SpaceMemberGuard } from './space-member.guard';
+import {
+  CanActivate,
+  ExecutionContext,
+  HttpStatus,
+  Injectable,
+} from '@nestjs/common';
+import { SpaceMemberGuard, type SpaceGuardRequest } from './space-member.guard';
 import { AppException } from '../exceptions/app.exception';
 import { ERROR_CODES } from '../constants/error-codes';
-
-interface MembershipWithRole {
-  role: 'OWNER' | 'MEMBER';
-}
 
 @Injectable()
 export class SpaceOwnerGuard extends SpaceMemberGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     await super.canActivate(context);
-    const request = context.switchToHttp().getRequest();
-    const membership = request.membership as MembershipWithRole;
+    const request = context.switchToHttp().getRequest<SpaceGuardRequest>();
+    const membership = request.membership!;
 
     if (membership.role !== 'OWNER') {
       throw new AppException(

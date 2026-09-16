@@ -28,13 +28,20 @@ export class MailService {
     template: MailTemplate,
     vars: Record<string, string>,
   ): Promise<string> {
-    const templatePath = join(__dirname, 'templates', locale, `${template}.mjml.hbs`);
+    const templatePath = join(
+      __dirname,
+      'templates',
+      locale,
+      `${template}.mjml.hbs`,
+    );
     const source = readFileSync(templatePath, 'utf-8');
     const mjmlMarkup = Handlebars.compile(source)(vars);
     const { html, errors } = await mjml2html(mjmlMarkup);
 
     if (errors.length > 0) {
-      throw new Error(`MJML compile error: ${errors.map((e) => e.formattedMessage).join('; ')}`);
+      throw new Error(
+        `MJML compile error: ${errors.map((e) => e.formattedMessage).join('; ')}`,
+      );
     }
 
     return html;

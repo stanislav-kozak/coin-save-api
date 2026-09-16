@@ -9,10 +9,15 @@ describe('TokenService', () => {
     const jwtService = { sign: vi.fn() };
     const service = new TokenService(jwtService as never, prisma as never);
 
-    const token = await service.issueRefreshToken('u1', { userAgent: 'vitest', ipAddress: '127.0.0.1' });
+    const token = await service.issueRefreshToken('u1', {
+      userAgent: 'vitest',
+      ipAddress: '127.0.0.1',
+    });
 
     expect(token).toMatch(/^[0-9a-f]{64}$/);
-    const createCall = create.mock.calls[0][0];
+    const createCall = create.mock.calls[0][0] as {
+      data: { userId: string; tokenHash: string };
+    };
     expect(createCall.data.userId).toBe('u1');
     expect(await argon2.verify(createCall.data.tokenHash, token)).toBe(true);
   });
@@ -32,14 +37,22 @@ describe('TokenService', () => {
     const result = await service.rotateRefreshToken(rawToken, {});
 
     expect(result.userId).toBe('u1');
-    expect(update).toHaveBeenCalledWith({ where: { id: 'rt1' }, data: { revokedAt: expect.any(Date) } });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'rt1' },
+      data: { revokedAt: expect.any(Date) },
+    });
     expect(create).toHaveBeenCalledTimes(1);
   });
 
   it('revokes all sessions when a revoked refresh token is presented again', async () => {
     const rawToken = 'b'.repeat(64);
     const tokenHash = await argon2.hash(rawToken);
-    const stored = { id: 'rt1', userId: 'u1', tokenHash, revokedAt: new Date() };
+    const stored = {
+      id: 'rt1',
+      userId: 'u1',
+      tokenHash,
+      revokedAt: new Date(),
+    };
 
     const findMany = vi.fn().mockResolvedValue([stored]);
     const updateMany = vi.fn().mockResolvedValue(undefined);
@@ -47,7 +60,9 @@ describe('TokenService', () => {
     const jwtService = { sign: vi.fn() };
     const service = new TokenService(jwtService as never, prisma as never);
 
-    await expect(service.rotateRefreshToken(rawToken, {})).rejects.toThrow(AppException);
+    await expect(service.rotateRefreshToken(rawToken, {})).rejects.toThrow(
+      AppException,
+    );
     expect(updateMany).toHaveBeenCalledWith({
       where: { userId: 'u1', revokedAt: null },
       data: { revokedAt: expect.any(Date) },

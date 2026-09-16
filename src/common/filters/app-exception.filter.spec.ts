@@ -23,7 +23,11 @@ describe('AppExceptionFilter', () => {
     const host = createHost((body) => (captured = body));
 
     filter.catch(
-      new AppException(ERROR_CODES.INVALID_CREDENTIALS, HttpStatus.UNAUTHORIZED, 'Invalid email or password'),
+      new AppException(
+        ERROR_CODES.INVALID_CREDENTIALS,
+        HttpStatus.UNAUTHORIZED,
+        'Invalid email or password',
+      ),
       host,
     );
 

@@ -1,17 +1,30 @@
-import { CanActivate, ExecutionContext, HttpStatus, Injectable } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  HttpStatus,
+  Injectable,
+} from '@nestjs/common';
+import type { Membership } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppException } from '../exceptions/app.exception';
 import { ERROR_CODES } from '../constants/error-codes';
 import { extractSpaceId } from '../decorators/space.decorator';
 import type { AuthenticatedUser } from '../types/authenticated-user';
 
+export interface SpaceGuardRequest {
+  user?: AuthenticatedUser;
+  params: Record<string, string | undefined>;
+  body?: { spaceId?: string };
+  membership?: Membership;
+}
+
 @Injectable()
 export class SpaceMemberGuard implements CanActivate {
   constructor(protected readonly prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
-    const user = request.user as AuthenticatedUser | undefined;
+    const request = context.switchToHttp().getRequest<SpaceGuardRequest>();
+    const user = request.user;
     const spaceId = extractSpaceId(request);
 
     if (!user || !spaceId) {

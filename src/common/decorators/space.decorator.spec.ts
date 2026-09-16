@@ -2,7 +2,10 @@ import { extractSpaceId } from './space.decorator';
 
 describe('extractSpaceId', () => {
   it('reads spaceId from route params first', () => {
-    const request = { params: { spaceId: 'space-1' }, body: { spaceId: 'space-2' } };
+    const request = {
+      params: { spaceId: 'space-1' },
+      body: { spaceId: 'space-2' },
+    };
     expect(extractSpaceId(request)).toBe('space-1');
   });
 

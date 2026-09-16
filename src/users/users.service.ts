@@ -26,6 +26,9 @@ export class UsersService {
   }
 
   updatePassword(userId: string, passwordHash: string): Promise<User> {
-    return this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
   }
 }

@@ -11,7 +11,9 @@ function createContext(request: unknown): ExecutionContext {
 describe('SpaceOwnerGuard', () => {
   it('allows access when the membership role is OWNER', async () => {
     const membership = { id: 'm1', userId: 'u1', spaceId: 's1', role: 'OWNER' };
-    const prisma = { membership: { findUnique: vi.fn().mockResolvedValue(membership) } };
+    const prisma = {
+      membership: { findUnique: vi.fn().mockResolvedValue(membership) },
+    };
     const guard = new SpaceOwnerGuard(prisma as never);
     const request = { user: { id: 'u1' }, params: { spaceId: 's1' } };
 
@@ -19,8 +21,15 @@ describe('SpaceOwnerGuard', () => {
   });
 
   it('throws FORBIDDEN_NOT_OWNER when the role is MEMBER', async () => {
-    const membership = { id: 'm1', userId: 'u1', spaceId: 's1', role: 'MEMBER' };
-    const prisma = { membership: { findUnique: vi.fn().mockResolvedValue(membership) } };
+    const membership = {
+      id: 'm1',
+      userId: 'u1',
+      spaceId: 's1',
+      role: 'MEMBER',
+    };
+    const prisma = {
+      membership: { findUnique: vi.fn().mockResolvedValue(membership) },
+    };
     const guard = new SpaceOwnerGuard(prisma as never);
     const request = { user: { id: 'u1' }, params: { spaceId: 's1' } };
 

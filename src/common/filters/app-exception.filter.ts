@@ -24,7 +24,11 @@ export class AppExceptionFilter implements ExceptionFilter {
       const body = exception.getResponse();
 
       if (typeof body === 'object' && body !== null && 'code' in body) {
-        const typedBody = body as { code: string; message: string; details?: Record<string, unknown> };
+        const typedBody = body as {
+          code: string;
+          message: string;
+          details?: Record<string, unknown>;
+        };
         const payload: ErrorBody = {
           statusCode: status,
           code: typedBody.code,
@@ -42,7 +46,10 @@ export class AppExceptionFilter implements ExceptionFilter {
 
       response.status(status).json({
         statusCode: status,
-        code: status === HttpStatus.BAD_REQUEST ? 'VALIDATION_ERROR' : 'HTTP_ERROR',
+        code:
+          status === Number(HttpStatus.BAD_REQUEST)
+            ? 'VALIDATION_ERROR'
+            : 'HTTP_ERROR',
         message: Array.isArray(rawMessage) ? rawMessage.join(', ') : rawMessage,
       });
       return;
