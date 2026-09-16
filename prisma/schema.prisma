@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -11,4 +5,271 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// ── Users & auth ────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  name          String?
+  avatarUrl     String?
+  locale        String    @default("uk")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  memberships      Membership[]
+  ownedSpaces      Space[]                @relation("SpaceOwner")
+  authAccounts     AuthAccount[]
+  refreshTokens    RefreshToken[]
+  createdExpenses  Expense[]
+  createdRecurring RecurringTransaction[]
+}
+
+model AuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String // "google"
+  providerAccountId String
+  createdAt         DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique // argon2 hash of the token
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ipAddress String?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// ── Spaces & membership ─────────────────────────────────────────
+
+enum Role {
+  OWNER
+  MEMBER
+}
+
+model Space {
+  id              String   @id @default(cuid())
+  name            String
+  slug            String   @unique
+  ownerId         String
+  owner           User     @relation("SpaceOwner", fields: [ownerId], references: [id])
+  primaryCurrency String   @default("UAH")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  memberships Membership[]
+  wallets     Wallet[]
+  categories  Category[]
+  expenses    Expense[]
+  recurring   RecurringTransaction[]
+  invitations Invitation[]
+}
+
+model Membership {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  spaceId  String
+  space    Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  role     Role     @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  @@unique([userId, spaceId])
+  @@index([spaceId])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  spaceId     String
+  space       Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  email       String
+  tokenHash   String    @unique
+  role        Role      @default(MEMBER)
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
+  @@index([spaceId])
+}
+
+// ── Wallets & categories ────────────────────────────────────────
+
+model Wallet {
+  id             String   @id @default(cuid())
+  spaceId        String
+  space          Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  name           String
+  currency       String // ISO 4217
+  icon           String?
+  color          String? // hex
+  initialBalance Decimal  @db.Decimal(19, 4)
+  archived       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  expenses  Expense[]
+  recurring RecurringTransaction[]
+
+  @@index([spaceId])
+}
+
+model Category {
+  id           String   @id @default(cuid())
+  spaceId      String
+  space        Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  name         String
+  icon         String?
+  color        String?
+  monthlyLimit Decimal? @db.Decimal(19, 4) // in space.primaryCurrency
+  archived     Boolean  @default(false)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  expenses  Expense[]
+  recurring RecurringTransaction[]
+
+  @@unique([spaceId, name])
+  @@index([spaceId])
+}
+
+// ── Transactions (expenses + incomes) ───────────────────────────
+
+enum TransactionType {
+  EXPENSE
+  INCOME
+}
+
+model Expense {
+  id         String    @id @default(cuid())
+  spaceId    String
+  space      Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  walletId   String
+  wallet     Wallet    @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  type            TransactionType @default(EXPENSE)
+  amount          Decimal         @db.Decimal(19, 4) // in walletCurrency
+  walletCurrency  String // snapshot at transaction time
+  amountInPrimary Decimal         @db.Decimal(19, 4) // in space.primaryCurrency
+  fxRate          Decimal         @db.Decimal(19, 8) // rate used
+
+  note        String?
+  occurredAt  DateTime // when it actually happened
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+
+  recurringId String?
+  recurring   RecurringTransaction? @relation(fields: [recurringId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([spaceId, occurredAt])
+  @@index([walletId])
+  @@index([categoryId])
+  @@index([recurringId])
+}
+
+// ── Recurring transactions ──────────────────────────────────────
+
+enum RecurringFrequency {
+  MONTHLY // v1: only MONTHLY. Enum kept for v2 extension.
+}
+
+model RecurringTransaction {
+  id         String    @id @default(cuid())
+  spaceId    String
+  space      Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  walletId   String
+  wallet     Wallet    @relation(fields: [walletId], references: [id], onDelete: Restrict)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  type     TransactionType
+  amount   Decimal         @db.Decimal(19, 4)
+  currency String
+
+  name       String // "Netflix"
+  note       String?
+  frequency  RecurringFrequency @default(MONTHLY)
+  dayOfMonth Int // 1-31; >month-length ⇒ last day
+
+  startDate       DateTime
+  endDate         DateTime?
+  lastGeneratedAt DateTime? // date of last materialized Expense
+
+  active      Boolean @default(true)
+  createdById String
+  createdBy   User    @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  generatedExpenses Expense[]
+  notificationLog   RecurringNotificationLog[]
+
+  @@index([spaceId])
+  @@index([active, lastGeneratedAt])
+}
+
+model RecurringNotificationLog {
+  id          String               @id @default(cuid())
+  recurringId String
+  recurring   RecurringTransaction @relation(fields: [recurringId], references: [id], onDelete: Cascade)
+  forDate     DateTime             @db.Date // expected occurrence date user was notified about
+  channel     String // "email" in v1
+  sentAt      DateTime             @default(now())
+
+  @@unique([recurringId, forDate, channel])
+}
+
+// ── Exchange rates ───────────────────────────────────────────────
+
+model ExchangeRate {
+  id           String   @id @default(cuid())
+  date         DateTime @db.Date
+  fromCurrency String
+  toCurrency   String
+  rate         Decimal  @db.Decimal(19, 8)
+  source       String   @default("frankfurter.dev")
+  fetchedAt    DateTime @default(now())
+
+  @@unique([date, fromCurrency, toCurrency])
+  @@index([date])
 }
