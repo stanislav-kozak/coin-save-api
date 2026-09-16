@@ -22,7 +22,8 @@
 
 ## Команди
 - Встановити залежності: `npm install`
-- Запустити дев-сервер: `npm run start:dev`
+- Підняти локальну БД (Postgres у Docker): `npm run docker:up` / зупинити: `npm run docker:down`
+- Запустити дев-сервер: `npm run start:dev` (потребує запущеної БД, див. вище)
 - Запустити тести: `npm run test` (unit), `npm run test:e2e` (integration/Playwright)
 - Лінтер: `npm run lint`
 - Білд: `npm run build`
