@@ -10,6 +10,7 @@ import { TokenService, type RequestMeta } from './token.service';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
+import { findMatchingToken } from '../common/utils/find-matching-token';
 
 const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
@@ -75,7 +76,7 @@ export class AuthService {
       where: { usedAt: null, expiresAt: { gt: new Date() } },
     });
 
-    const matched = await this.findMatchingToken(candidates, token);
+    const matched = await findMatchingToken(candidates, token);
     if (!matched) {
       throw new AppException(
         ERROR_CODES.INVALID_VERIFICATION_TOKEN,
@@ -232,7 +233,7 @@ export class AuthService {
       where: { usedAt: null, expiresAt: { gt: new Date() } },
     });
 
-    const matched = await this.findMatchingToken(candidates, token);
+    const matched = await findMatchingToken(candidates, token);
     if (!matched) {
       throw new AppException(
         ERROR_CODES.INVALID_RESET_TOKEN,
@@ -247,17 +248,5 @@ export class AuthService {
       data: { usedAt: new Date() },
     });
     await this.users.updatePassword(matched.userId, passwordHash);
-  }
-
-  private async findMatchingToken<T extends { tokenHash: string }>(
-    candidates: T[],
-    presentedToken: string,
-  ): Promise<T | undefined> {
-    for (const candidate of candidates) {
-      if (await argon2.verify(candidate.tokenHash, presentedToken)) {
-        return candidate;
-      }
-    }
-    return undefined;
   }
 }
