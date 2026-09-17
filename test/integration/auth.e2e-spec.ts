@@ -3,7 +3,10 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
-import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
+import {
+  PostgreSqlContainer,
+  StartedPostgreSqlContainer,
+} from '@testcontainers/postgresql';
 import { AppModule } from '../../src/app.module';
 import { AppExceptionFilter } from '../../src/common/filters/app-exception.filter';
 import { MailService } from '../../src/mail/mail.service';
@@ -28,7 +31,10 @@ describe('Auth flow (integration)', () => {
     process.env.GOOGLE_CLIENT_ID = 'unused-in-tests';
     process.env.GOOGLE_CLIENT_SECRET = 'unused-in-tests';
 
-    execSync('npx prisma migrate deploy', { env: process.env, stdio: 'inherit' });
+    execSync('npx prisma migrate deploy', {
+      env: process.env,
+      stdio: 'inherit',
+    });
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(MailService)
@@ -49,7 +55,9 @@ describe('Auth flow (integration)', () => {
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api');
     app.use(cookieParser());
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     app.useGlobalFilters(new AppExceptionFilter());
     await app.init();
   }, 60_000);
@@ -63,15 +71,26 @@ describe('Auth flow (integration)', () => {
     const email = 'family@example.com';
     const password = 'super-secret-1';
 
-    await request(app.getHttpServer()).post('/api/auth/signup').send({ email, password }).expect(201);
+    await request(app.getHttpServer())
+      .post('/api/auth/signup')
+      .send({ email, password })
+      .expect(201);
 
     const verifyEmail = capturedEmails.find((e) => e.to === email);
     expect(verifyEmail).toBeDefined();
-    const verifyToken = new URL(verifyEmail!.vars.verifyUrl).searchParams.get('token');
+    const verifyToken = new URL(verifyEmail!.vars.verifyUrl).searchParams.get(
+      'token',
+    );
 
-    await request(app.getHttpServer()).post('/api/auth/verify-email').send({ token: verifyToken }).expect(200);
+    await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
 
-    const loginRes = await request(app.getHttpServer()).post('/api/auth/login').send({ email, password }).expect(200);
+    const loginRes = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email, password })
+      .expect(200);
     const cookies = loginRes.headers['set-cookie'] as unknown as string[];
     expect(cookies.some((c) => c.startsWith('access='))).toBe(true);
     expect(cookies.some((c) => c.startsWith('refresh='))).toBe(true);
@@ -80,15 +99,25 @@ describe('Auth flow (integration)', () => {
       .post('/api/auth/refresh')
       .set('Cookie', cookies)
       .expect(200);
-    const refreshedCookies = refreshRes.headers['set-cookie'] as unknown as string[];
+    const refreshedCookies = refreshRes.headers[
+      'set-cookie'
+    ] as unknown as string[];
 
-    await request(app.getHttpServer()).post('/api/auth/logout').set('Cookie', refreshedCookies).expect(200);
+    await request(app.getHttpServer())
+      .post('/api/auth/logout')
+      .set('Cookie', refreshedCookies)
+      .expect(200);
 
     capturedEmails.length = 0;
-    await request(app.getHttpServer()).post('/api/auth/request-password-reset').send({ email }).expect(200);
+    await request(app.getHttpServer())
+      .post('/api/auth/request-password-reset')
+      .send({ email })
+      .expect(200);
 
     const resetEmail = capturedEmails.find((e) => e.to === email);
-    const resetToken = new URL(resetEmail!.vars.resetUrl).searchParams.get('token');
+    const resetToken = new URL(resetEmail!.vars.resetUrl).searchParams.get(
+      'token',
+    );
 
     await request(app.getHttpServer())
       .post('/api/auth/reset-password')
@@ -105,15 +134,31 @@ describe('Auth flow (integration)', () => {
     const email = 'reuse-test@example.com';
     const password = 'super-secret-1';
 
-    await request(app.getHttpServer()).post('/api/auth/signup').send({ email, password }).expect(201);
+    await request(app.getHttpServer())
+      .post('/api/auth/signup')
+      .send({ email, password })
+      .expect(201);
     const verifyEmail = capturedEmails.find((e) => e.to === email);
-    const verifyToken = new URL(verifyEmail!.vars.verifyUrl).searchParams.get('token');
-    await request(app.getHttpServer()).post('/api/auth/verify-email').send({ token: verifyToken }).expect(200);
+    const verifyToken = new URL(verifyEmail!.vars.verifyUrl).searchParams.get(
+      'token',
+    );
+    await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
 
-    const loginRes = await request(app.getHttpServer()).post('/api/auth/login').send({ email, password }).expect(200);
-    const originalCookies = loginRes.headers['set-cookie'] as unknown as string[];
+    const loginRes = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email, password })
+      .expect(200);
+    const originalCookies = loginRes.headers[
+      'set-cookie'
+    ] as unknown as string[];
 
-    await request(app.getHttpServer()).post('/api/auth/refresh').set('Cookie', originalCookies).expect(200);
+    await request(app.getHttpServer())
+      .post('/api/auth/refresh')
+      .set('Cookie', originalCookies)
+      .expect(200);
 
     const res = await request(app.getHttpServer())
       .post('/api/auth/refresh')
