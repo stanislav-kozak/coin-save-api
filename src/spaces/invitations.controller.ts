@@ -1,12 +1,13 @@
 import {
+  Body,
   Controller,
   HttpCode,
   HttpStatus,
-  Param,
   Post,
   UseGuards,
 } from '@nestjs/common';
 import { SpacesService } from './spaces.service';
+import { AcceptInvitationDto } from './dto/accept-invitation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
@@ -16,12 +17,12 @@ import type { AuthenticatedUser } from '../common/types/authenticated-user';
 export class InvitationsController {
   constructor(private readonly spacesService: SpacesService) {}
 
-  @Post(':token/accept')
+  @Post('accept')
   @HttpCode(HttpStatus.OK)
   accept(
-    @Param('token') token: string,
+    @Body() dto: AcceptInvitationDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.spacesService.acceptInvitation(user.id, user.email, token);
+    return this.spacesService.acceptInvitation(user.id, user.email, dto.token);
   }
 }

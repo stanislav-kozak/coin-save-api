@@ -202,7 +202,8 @@ describe('Spaces flow (integration)', () => {
 
     const invitationToken = tokenFor(inviteeEmail, 'invitation', 'acceptUrl');
     await inviteeAgent
-      .post(`/api/invitations/${invitationToken}/accept`)
+      .post('/api/invitations/accept')
+      .send({ token: invitationToken })
       .expect(200);
 
     const membersRes = await ownerAgent

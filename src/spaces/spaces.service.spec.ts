@@ -1,13 +1,17 @@
 import { HttpStatus } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { Role } from '@prisma/client';
+import type { Mock } from 'vitest';
 import { SpacesService } from './spaces.service';
 import { AppException } from '../common/exceptions/app.exception';
+
+type PrismaMock = Record<string, Record<string, Mock>>;
 
 function buildService(
   overrides: {
     prisma?: Record<string, unknown>;
     mail?: Record<string, unknown>;
+    config?: Record<string, unknown>;
   } = {},
 ) {
   const basePrisma = {
@@ -35,15 +39,12 @@ function buildService(
     },
     category: { createMany: vi.fn() },
     user: { findUnique: vi.fn() },
-  } as Record<string, Record<string, unknown>>;
-  const overridesPrisma = (overrides.prisma ?? {}) as Record<
-    string,
-    Record<string, unknown>
-  >;
+  } as PrismaMock;
+  const overridesPrisma = (overrides.prisma ?? {}) as PrismaMock;
   // Merge per-table so an override like `{ membership: { count } }` only replaces the
   // named methods on that table instead of wiping out the rest of its default mocks
   // (e.g. `delete`), which a plain top-level `...overrides.prisma` spread would do.
-  const prisma = Object.fromEntries(
+  const prisma: PrismaMock = Object.fromEntries(
     Object.keys(basePrisma).map((table) => [
       table,
       { ...basePrisma[table], ...(overridesPrisma[table] ?? {}) },
@@ -53,8 +54,16 @@ function buildService(
     send: vi.fn().mockResolvedValue(undefined),
     ...overrides.mail,
   };
-  const service = new SpacesService(prisma as never, mail as never);
-  return { service, prisma, mail };
+  const config = {
+    get: vi.fn().mockReturnValue('http://localhost:3001'),
+    ...overrides.config,
+  };
+  const service = new SpacesService(
+    prisma as never,
+    mail as never,
+    config as never,
+  );
+  return { service, prisma, mail, config };
 }
 
 describe('SpacesService', () => {

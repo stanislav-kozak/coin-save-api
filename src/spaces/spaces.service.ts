@@ -1,12 +1,8 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import * as argon2 from 'argon2';
-import {
-  Role,
-  type Space,
-  type Membership,
-  type Invitation,
-} from '@prisma/client';
+import { Role, type Space, type Membership } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { AppException } from '../common/exceptions/app.exception';
@@ -37,11 +33,21 @@ export interface MemberView {
   joinedAt: Date;
 }
 
+export interface InvitationView {
+  id: string;
+  email: string;
+  role: Role;
+  invitedById: string;
+  expiresAt: Date;
+  createdAt: Date;
+}
+
 @Injectable()
 export class SpacesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
+    private readonly config: ConfigService,
   ) {}
 
   async createSpace(ownerId: string, name: string): Promise<Space> {
@@ -212,16 +218,25 @@ export class SpacesService {
       {
         spaceName: space.name,
         inviterName: inviter?.name ?? inviter?.email ?? 'CoinSave',
-        acceptUrl: `${process.env.FRONTEND_URL}/invitations/accept?token=${token}`,
+        acceptUrl: `${this.config.get<string>('FRONTEND_URL')}/invitations/accept?token=${token}`,
       },
     );
   }
 
-  listInvitations(spaceId: string): Promise<Invitation[]> {
-    return this.prisma.invitation.findMany({
+  async listInvitations(spaceId: string): Promise<InvitationView[]> {
+    const invitations = await this.prisma.invitation.findMany({
       where: { spaceId, acceptedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     });
+
+    return invitations.map((invitation) => ({
+      id: invitation.id,
+      email: invitation.email,
+      role: invitation.role,
+      invitedById: invitation.invitedById,
+      expiresAt: invitation.expiresAt,
+      createdAt: invitation.createdAt,
+    }));
   }
 
   async revokeInvitation(spaceId: string, invitationId: string): Promise<void> {
