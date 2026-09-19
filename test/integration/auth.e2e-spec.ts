@@ -53,6 +53,7 @@ describe('Auth flow (integration)', () => {
       .compile();
 
     app = moduleRef.createNestApplication();
+    app.setGlobalPrefix('api');
     app.use(cookieParser());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
@@ -71,7 +72,7 @@ describe('Auth flow (integration)', () => {
     const password = 'super-secret-1';
 
     await request(app.getHttpServer())
-      .post('/auth/signup')
+      .post('/api/auth/signup')
       .send({ email, password })
       .expect(201);
 
@@ -82,12 +83,12 @@ describe('Auth flow (integration)', () => {
     );
 
     await request(app.getHttpServer())
-      .post('/auth/verify-email')
+      .post('/api/auth/verify-email')
       .send({ token: verifyToken })
       .expect(200);
 
     const loginRes = await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/api/auth/login')
       .send({ email, password })
       .expect(200);
     const cookies = loginRes.headers['set-cookie'] as unknown as string[];
@@ -95,7 +96,7 @@ describe('Auth flow (integration)', () => {
     expect(cookies.some((c) => c.startsWith('refresh='))).toBe(true);
 
     const refreshRes = await request(app.getHttpServer())
-      .post('/auth/refresh')
+      .post('/api/auth/refresh')
       .set('Cookie', cookies)
       .expect(200);
     const refreshedCookies = refreshRes.headers[
@@ -103,13 +104,13 @@ describe('Auth flow (integration)', () => {
     ] as unknown as string[];
 
     await request(app.getHttpServer())
-      .post('/auth/logout')
+      .post('/api/auth/logout')
       .set('Cookie', refreshedCookies)
       .expect(200);
 
     capturedEmails.length = 0;
     await request(app.getHttpServer())
-      .post('/auth/request-password-reset')
+      .post('/api/auth/request-password-reset')
       .send({ email })
       .expect(200);
 
@@ -119,12 +120,12 @@ describe('Auth flow (integration)', () => {
     );
 
     await request(app.getHttpServer())
-      .post('/auth/reset-password')
+      .post('/api/auth/reset-password')
       .send({ token: resetToken, newPassword: 'new-super-secret-1' })
       .expect(200);
 
     await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/api/auth/login')
       .send({ email, password: 'new-super-secret-1' })
       .expect(200);
   });
@@ -134,7 +135,7 @@ describe('Auth flow (integration)', () => {
     const password = 'super-secret-1';
 
     await request(app.getHttpServer())
-      .post('/auth/signup')
+      .post('/api/auth/signup')
       .send({ email, password })
       .expect(201);
     const verifyEmail = capturedEmails.find((e) => e.to === email);
@@ -142,12 +143,12 @@ describe('Auth flow (integration)', () => {
       'token',
     );
     await request(app.getHttpServer())
-      .post('/auth/verify-email')
+      .post('/api/auth/verify-email')
       .send({ token: verifyToken })
       .expect(200);
 
     const loginRes = await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/api/auth/login')
       .send({ email, password })
       .expect(200);
     const originalCookies = loginRes.headers[
@@ -155,12 +156,12 @@ describe('Auth flow (integration)', () => {
     ] as unknown as string[];
 
     await request(app.getHttpServer())
-      .post('/auth/refresh')
+      .post('/api/auth/refresh')
       .set('Cookie', originalCookies)
       .expect(200);
 
     const res = await request(app.getHttpServer())
-      .post('/auth/refresh')
+      .post('/api/auth/refresh')
       .set('Cookie', originalCookies)
       .expect(401);
 

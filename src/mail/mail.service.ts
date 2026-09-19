@@ -6,7 +6,7 @@ import Handlebars from 'handlebars';
 import mjml2html from 'mjml';
 
 export type MailLocale = 'uk' | 'en';
-export type MailTemplate = 'verify-email' | 'password-reset';
+export type MailTemplate = 'verify-email' | 'password-reset' | 'invitation';
 
 @Injectable()
 export class MailService {

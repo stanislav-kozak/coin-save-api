@@ -28,4 +28,31 @@ describe('MailService', () => {
     );
     expect(call.html).toContain('<!doctype html');
   });
+
+  it('renders the invitation template with the accept link', async () => {
+    const mailerService = { sendMail: vi.fn().mockResolvedValue(undefined) };
+    const service = new MailService(mailerService as never);
+
+    await service.send(
+      'invitee@example.com',
+      'uk',
+      'invitation',
+      'Запрошення до CoinSave',
+      {
+        spaceName: 'Family',
+        inviterName: 'Stas',
+        acceptUrl: 'https://app.coinsave.com/invitations/accept?token=xyz789',
+      },
+    );
+
+    const call = mailerService.sendMail.mock.calls[0][0] as {
+      to: string;
+      html: string;
+    };
+    expect(call.to).toBe('invitee@example.com');
+    expect(call.html).toContain(
+      'https://app.coinsave.com/invitations/accept?token=xyz789',
+    );
+    expect(call.html).toContain('Family');
+  });
 });
