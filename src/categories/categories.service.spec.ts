@@ -1,13 +1,18 @@
 import { HttpStatus } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
 import { AppException } from '../common/exceptions/app.exception';
+import {
+  buildPrismaMock,
+  type PrismaMock,
+} from '../../test/helpers/prisma-mock';
 
 function buildService(
   overrides: {
-    prisma?: { category?: Record<string, unknown>; $transaction?: unknown };
+    prisma?: Partial<{ [K in keyof PrismaMock]: Partial<PrismaMock[K]> }>;
+    transaction?: ReturnType<typeof vi.fn>;
   } = {},
 ) {
-  const prisma = {
+  const basePrisma = {
     category: {
       create: vi.fn(),
       findMany: vi.fn(),
@@ -15,10 +20,11 @@ function buildService(
       update: vi.fn(),
       delete: vi.fn(),
       aggregate: vi.fn().mockResolvedValue({ _max: { sortOrder: null } }),
-      ...overrides.prisma?.category,
     },
-    $transaction:
-      overrides.prisma?.$transaction ?? vi.fn().mockResolvedValue([]),
+  };
+  const prisma = {
+    ...buildPrismaMock(basePrisma, overrides.prisma),
+    $transaction: overrides.transaction ?? vi.fn().mockResolvedValue([]),
   };
   const service = new CategoriesService(prisma as never);
   return { service, prisma };

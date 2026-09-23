@@ -2,7 +2,6 @@ import { execSync } from 'child_process';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
-import request from 'supertest';
 import { TransactionType } from '@prisma/client';
 import {
   PostgreSqlContainer,
@@ -12,80 +11,7 @@ import { AppModule } from '../../src/app.module';
 import { AppExceptionFilter } from '../../src/common/filters/app-exception.filter';
 import { MailService } from '../../src/mail/mail.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
-
-// `request.agent()`'s built-in cookie jar refuses to replay `Secure`-flagged
-// cookies over a plain-http connection (see `cookiejar`'s
-// `access_info.secure` check), and the auth cookies set by `AuthController`
-// are always `secure: true`. Since this test server runs over http, the
-// stock agent silently drops the session after login. This minimal
-// hand-rolled jar captures `Set-Cookie` headers (honoring each cookie's
-// `Path` attribute, the way a real cookie jar would) and replays them
-// regardless of the `Secure` attribute, which is what we want for an http
-// test server standing in for a real https deployment.
-// (Same fix as `test/integration/spaces.e2e-spec.ts`.)
-interface CapturedCookie {
-  name: string;
-  value: string;
-  path: string;
-}
-
-function cookieAppliesToPath(cookiePath: string, requestPath: string): boolean {
-  if (requestPath === cookiePath) return true;
-  if (!requestPath.startsWith(cookiePath)) return false;
-  return cookiePath.endsWith('/') || requestPath[cookiePath.length] === '/';
-}
-
-function createCookieAgent(
-  app: INestApplication,
-): Record<'post' | 'get' | 'patch', (path: string) => request.Test> {
-  const cookies: CapturedCookie[] = [];
-
-  function captureCookies(res: request.Response): void {
-    const setCookie = res.headers['set-cookie'] as unknown as
-      string[] | undefined;
-    if (!setCookie) return;
-    for (const raw of setCookie) {
-      const [namePair, ...attrs] = raw.split(';').map((part) => part.trim());
-      const eq = namePair.indexOf('=');
-      if (eq === -1) continue;
-      const name = namePair.slice(0, eq);
-      const value = namePair.slice(eq + 1);
-      const pathAttr = attrs.find((a) => a.toLowerCase().startsWith('path='));
-      const path = pathAttr ? pathAttr.slice('path='.length) : '/';
-      const existing = cookies.find((c) => c.name === name && c.path === path);
-      if (existing) {
-        existing.value = value;
-      } else {
-        cookies.push({ name, value, path });
-      }
-    }
-  }
-
-  function build(method: 'post' | 'get' | 'patch') {
-    return (path: string): request.Test => {
-      const req = request(app.getHttpServer())[method](path);
-      const applicable = cookies.filter((c) =>
-        cookieAppliesToPath(c.path, path),
-      );
-      if (applicable.length > 0) {
-        const header = applicable.map((c) => `${c.name}=${c.value}`).join('; ');
-        req.set('Cookie', header);
-      }
-      type EndCallback = (err: Error | null, res: request.Response) => void;
-      const originalEnd = req.end.bind(req) as (cb?: EndCallback) => void;
-      req.end = (callback?: EndCallback): request.Test => {
-        originalEnd((err, res) => {
-          if (res) captureCookies(res);
-          callback?.(err, res);
-        });
-        return req;
-      };
-      return req;
-    };
-  }
-
-  return { post: build('post'), get: build('get'), patch: build('patch') };
-}
+import { createCookieAgent } from '../helpers/cookie-agent';
 
 describe('Wallets flow (integration)', () => {
   let container: StartedPostgreSqlContainer;
