@@ -65,4 +65,17 @@ describe('CategoriesController', () => {
       .send({ name: 'Kids', monthlyLimit: -5 })
       .expect(400);
   });
+
+  it('PATCH /spaces/:spaceId/categories/reorder rejects a duplicate id with 400', async () => {
+    await request(app.getHttpServer())
+      .patch('/spaces/s1/categories/reorder')
+      .send({ orderedIds: ['c1', 'c2', 'c1'] })
+      .expect(400);
+
+    expect(categoriesService.reorderCategories).not.toHaveBeenCalledWith('s1', [
+      'c1',
+      'c2',
+      'c1',
+    ]);
+  });
 });

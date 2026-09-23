@@ -131,6 +131,48 @@ describe('CategoriesService', () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
+  it('excludes archived categories from the required id set when reordering', async () => {
+    const { service, prisma } = buildService({
+      prisma: {
+        category: {
+          findMany: vi
+            .fn()
+            .mockResolvedValueOnce([{ id: 'c1', archived: false }])
+            .mockResolvedValueOnce([
+              { id: 'c1', archived: false, sortOrder: 0 },
+            ]),
+        },
+        $transaction: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    const result = await service.reorderCategories('s1', ['c1']);
+
+    expect(prisma.category.findMany).toHaveBeenNthCalledWith(1, {
+      where: { spaceId: 's1', archived: false },
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(result[0].id).toBe('c1');
+  });
+
+  it('rejects a duplicate id that still covers the full existing set', async () => {
+    const { service, prisma } = buildService({
+      prisma: {
+        category: {
+          findMany: vi.fn().mockResolvedValue([{ id: 'c1' }, { id: 'c2' }]),
+        },
+      },
+    });
+
+    try {
+      await service.reorderCategories('s1', ['c2', 'c1', 'c2']);
+      throw new Error('expected rejection');
+    } catch (error) {
+      expect((error as AppException).getStatus()).toBe(HttpStatus.BAD_REQUEST);
+    }
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
   it('reassigns sortOrder for every category in the provided order', async () => {
     const { service, prisma } = buildService({
       prisma: {

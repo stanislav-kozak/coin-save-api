@@ -193,6 +193,17 @@ describe('Categories flow (integration)', () => {
       .expect(200);
     expect(withArchived.body).toHaveLength(7);
 
+    const activeOnlyList = await agent
+      .get(`/api/spaces/${spaceId}/categories`)
+      .expect(200);
+    const activeOnlyIds = (activeOnlyList.body as { id: string }[]).map(
+      (c) => c.id,
+    );
+    await agent
+      .patch(`/api/spaces/${spaceId}/categories/reorder`)
+      .send({ orderedIds: activeOnlyIds })
+      .expect(200);
+
     await agent
       .patch(`/api/spaces/${spaceId}/categories/${categoryId}/unarchive`)
       .expect(200);

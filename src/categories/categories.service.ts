@@ -100,14 +100,15 @@ export class CategoriesService {
     orderedIds: string[],
   ): Promise<Category[]> {
     const existing = await this.prisma.category.findMany({
-      where: { spaceId },
+      where: { spaceId, archived: false },
     });
     const existingIds = new Set(existing.map((c) => c.id));
     const providedIds = new Set(orderedIds);
 
     const sameSize = existingIds.size === providedIds.size;
+    const sameLength = orderedIds.length === existing.length;
     const sameMembers = [...existingIds].every((id) => providedIds.has(id));
-    if (!sameSize || !sameMembers) {
+    if (!sameSize || !sameLength || !sameMembers) {
       throw new AppException(
         ERROR_CODES.INVALID_REORDER,
         HttpStatus.BAD_REQUEST,
@@ -124,7 +125,7 @@ export class CategoriesService {
       ),
     );
 
-    return this.listCategories(spaceId, true);
+    return this.listCategories(spaceId, false);
   }
 
   private async setArchived(
