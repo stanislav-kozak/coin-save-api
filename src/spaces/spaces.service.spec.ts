@@ -1,15 +1,16 @@
 import { HttpStatus } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { Role } from '@prisma/client';
-import type { Mock } from 'vitest';
 import { SpacesService } from './spaces.service';
 import { AppException } from '../common/exceptions/app.exception';
-
-type PrismaMock = Record<string, Record<string, Mock>>;
+import {
+  buildPrismaMock,
+  type PrismaMock,
+} from '../../test/helpers/prisma-mock';
 
 function buildService(
   overrides: {
-    prisma?: Record<string, unknown>;
+    prisma?: Partial<{ [K in keyof PrismaMock]: Partial<PrismaMock[K]> }>;
     mail?: Record<string, unknown>;
     config?: Record<string, unknown>;
   } = {},
@@ -39,17 +40,8 @@ function buildService(
     },
     category: { createMany: vi.fn() },
     user: { findUnique: vi.fn() },
-  } as PrismaMock;
-  const overridesPrisma = (overrides.prisma ?? {}) as PrismaMock;
-  // Merge per-table so an override like `{ membership: { count } }` only replaces the
-  // named methods on that table instead of wiping out the rest of its default mocks
-  // (e.g. `delete`), which a plain top-level `...overrides.prisma` spread would do.
-  const prisma: PrismaMock = Object.fromEntries(
-    Object.keys(basePrisma).map((table) => [
-      table,
-      { ...basePrisma[table], ...(overridesPrisma[table] ?? {}) },
-    ]),
-  );
+  };
+  const prisma = buildPrismaMock(basePrisma, overrides.prisma);
   const mail = {
     send: vi.fn().mockResolvedValue(undefined),
     ...overrides.mail,

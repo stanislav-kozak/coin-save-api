@@ -43,8 +43,19 @@
   код, а не локалізований текст (локалізація на фронтенді).
 - Guards композиційно: `JwtAuthGuard` → `SpaceMemberGuard` → `SpaceOwnerGuard`.
 
+### Тестування
+- Мок-хелпери для інтеграційних/unit-тестів беруться з `test/helpers/` (`createCookieAgent`,
+  `buildPrismaMock`), а не копіюються в кожен новий `*.e2e-spec.ts`/`*.service.spec.ts` —
+  дублювання цього коду вже тричі призводило до одного й того ж бага (див. нижче).
+- При частковому override мок-об'єкта Prisma в тестах (`buildService({ prisma: {...} })`)
+  злиття має бути **глибоким по таблиці**: `{ category: { ...defaults.category, ...overrides.category } }`,
+  інакше не перевизначені методи (`delete`, `findMany` тощо) зникають і тест падає з
+  `TypeError: ... is not a function`. Використовуй `buildPrismaMock` з `test/helpers/prisma-mock.ts`
+  замість написання цього злиття вручну.
+
 ## Правила для агента
-- Перед завершенням задачі обов'язково прогнати тести (`npm run test`) та лінтер (`npm run lint`).
+- Перед завершенням задачі обов'язково прогнати `npm run build`, `npm run lint`,
+  `npm run typecheck`, `npm run test`, `npm run test:e2e`.
 - Не чіпати: `prisma/migrations` (згенеровані), `.env`-файли, секрети, `docker-compose`/CI-конфіги
   без явного запиту.
 - У логи не потрапляють паролі, токени, персональні дані.

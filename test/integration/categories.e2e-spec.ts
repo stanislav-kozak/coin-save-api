@@ -2,7 +2,6 @@ import { execSync } from 'child_process';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
-import request from 'supertest';
 import {
   PostgreSqlContainer,
   StartedPostgreSqlContainer,
@@ -10,72 +9,7 @@ import {
 import { AppModule } from '../../src/app.module';
 import { AppExceptionFilter } from '../../src/common/filters/app-exception.filter';
 import { MailService } from '../../src/mail/mail.service';
-
-interface CapturedCookie {
-  value: string;
-  path: string;
-}
-
-function cookieAppliesToPath(cookiePath: string, requestPath: string): boolean {
-  if (cookiePath === requestPath) return true;
-  const normalized = cookiePath.endsWith('/') ? cookiePath : `${cookiePath}/`;
-  return requestPath.startsWith(normalized);
-}
-
-function createCookieAgent(
-  app: INestApplication,
-): Record<'post' | 'get' | 'patch' | 'delete', (path: string) => request.Test> {
-  const cookies = new Map<string, CapturedCookie>();
-
-  function captureCookies(res: request.Response): void {
-    const setCookie = res.headers['set-cookie'] as unknown as
-      string[] | undefined;
-    if (!setCookie) return;
-    for (const raw of setCookie) {
-      const parts = raw.split(';').map((p) => p.trim());
-      const nameValue = parts[0];
-      const eq = nameValue.indexOf('=');
-      if (eq === -1) continue;
-      const name = nameValue.slice(0, eq);
-      const value = nameValue.slice(eq + 1);
-      const pathPart = parts.find((p) => p.toLowerCase().startsWith('path='));
-      const path = pathPart ? pathPart.slice('path='.length) : '/';
-      cookies.set(name, { value, path });
-    }
-  }
-
-  function build(method: 'post' | 'get' | 'patch' | 'delete') {
-    return (path: string): request.Test => {
-      const req = request(app.getHttpServer())[method](path);
-      const applicable = [...cookies.entries()].filter(([, c]) =>
-        cookieAppliesToPath(c.path, path),
-      );
-      if (applicable.length > 0) {
-        req.set(
-          'Cookie',
-          applicable.map(([name, c]) => `${name}=${c.value}`).join('; '),
-        );
-      }
-      type EndCallback = (err: Error | null, res: request.Response) => void;
-      const originalEnd = req.end.bind(req) as (
-        cb?: EndCallback,
-      ) => request.Test;
-      req.end = (callback?: EndCallback): request.Test =>
-        originalEnd((err, res) => {
-          if (res) captureCookies(res);
-          callback?.(err, res);
-        });
-      return req;
-    };
-  }
-
-  return {
-    post: build('post'),
-    get: build('get'),
-    patch: build('patch'),
-    delete: build('delete'),
-  };
-}
+import { createCookieAgent } from '../helpers/cookie-agent';
 
 describe('Categories flow (integration)', () => {
   let container: StartedPostgreSqlContainer;

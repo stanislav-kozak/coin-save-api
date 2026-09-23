@@ -2,9 +2,17 @@ import { HttpStatus } from '@nestjs/common';
 import { Prisma, TransactionType } from '@prisma/client';
 import { WalletsService } from './wallets.service';
 import { AppException } from '../common/exceptions/app.exception';
+import {
+  buildPrismaMock,
+  type PrismaMock,
+} from '../../test/helpers/prisma-mock';
 
-function buildService(overrides: { prisma?: Record<string, unknown> } = {}) {
-  const prisma = {
+function buildService(
+  overrides: {
+    prisma?: Partial<{ [K in keyof PrismaMock]: Partial<PrismaMock[K]> }>;
+  } = {},
+) {
+  const basePrisma = {
     wallet: {
       create: vi.fn(),
       findMany: vi.fn(),
@@ -14,8 +22,8 @@ function buildService(overrides: { prisma?: Record<string, unknown> } = {}) {
     expense: {
       groupBy: vi.fn().mockResolvedValue([]),
     },
-    ...overrides.prisma,
   };
+  const prisma = buildPrismaMock(basePrisma, overrides.prisma);
   const service = new WalletsService(prisma as never);
   return { service, prisma };
 }
