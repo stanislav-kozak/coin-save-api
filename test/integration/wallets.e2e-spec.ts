@@ -212,6 +212,13 @@ describe('Wallets flow (integration)', () => {
       .expect(200);
     expect(Number(afterExpensesRes.body.balance)).toBe(1050);
 
+    const updateRes = await agent
+      .patch(`/api/spaces/${spaceId}/wallets/${walletId}`)
+      .send({ name: 'Renamed', initialBalance: -50 })
+      .expect(200);
+    expect(updateRes.body.name).toBe('Renamed');
+    expect(Number(updateRes.body.balance)).toBe(0);
+
     await agent
       .patch(`/api/spaces/${spaceId}/wallets/${walletId}/archive`)
       .expect(200);

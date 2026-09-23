@@ -95,7 +95,12 @@ export class WalletsService {
 
     const wallet = await this.prisma.wallet.update({
       where: { id: walletId },
-      data: input,
+      data: {
+        name: input.name,
+        icon: input.icon,
+        color: input.color,
+        initialBalance: input.initialBalance,
+      },
     });
 
     const movements = await this.sumMovements([wallet.id]);
