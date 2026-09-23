@@ -2,6 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CurrencyService } from './currencies.service';
 import { AppException } from '../common/exceptions/app.exception';
+import { ERROR_CODES } from '../common/constants/error-codes';
 import {
   buildPrismaMock,
   type PrismaMock,
@@ -139,7 +140,31 @@ describe('CurrencyService', () => {
       expect((error as AppException).getStatus()).toBe(
         HttpStatus.SERVICE_UNAVAILABLE,
       );
+      expect((error as AppException).getResponse()).toMatchObject({
+        code: ERROR_CODES.CURRENCY_API_UNAVAILABLE,
+      });
     }
+  });
+
+  it('throws CURRENCY_NOT_SUPPORTED (400) for an unsupported currency code, without calling fetch or Prisma', async () => {
+    const fetchSpy = fetchOk({});
+    vi.stubGlobal('fetch', fetchSpy);
+    const { service, prisma } = buildService();
+
+    try {
+      await service.getRate('XXX', 'USD', new Date('2026-09-01'));
+      throw new Error('expected rejection');
+    } catch (error) {
+      expect((error as AppException).getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      expect((error as AppException).getResponse()).toMatchObject({
+        code: ERROR_CODES.CURRENCY_NOT_SUPPORTED,
+      });
+    }
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(prisma.exchangeRate.findUnique).not.toHaveBeenCalled();
+    expect(prisma.exchangeRate.findFirst).not.toHaveBeenCalled();
+    expect(prisma.exchangeRate.upsert).not.toHaveBeenCalled();
   });
 
   it('convert multiplies the amount by the resolved rate', async () => {

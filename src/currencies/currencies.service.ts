@@ -36,11 +36,24 @@ export class CurrencyService {
   }
 
   async getRate(from: string, to: string, date: Date): Promise<Prisma.Decimal> {
+    const unsupported = [from, to].filter(
+      (currency) =>
+        !(SUPPORTED_CURRENCIES as readonly string[]).includes(currency),
+    );
+    if (unsupported.length > 0) {
+      throw new AppException(
+        ERROR_CODES.CURRENCY_NOT_SUPPORTED,
+        HttpStatus.BAD_REQUEST,
+        `Unsupported currency code(s): ${unsupported.join(', ')}`,
+      );
+    }
+
     if (from === to) {
       return new Prisma.Decimal(1);
     }
 
-    const dateOnly = this.toKyivDateOnly(date);
+    const dateStr = this.toKyivDateString(date);
+    const dateOnly = new Date(`${dateStr}T00:00:00.000Z`);
 
     const direct = await this.prisma.exchangeRate.findUnique({
       where: {
@@ -60,7 +73,6 @@ export class CurrencyService {
 
     if (!eurToFrom || !eurToTo) {
       try {
-        const dateStr = formatInTimeZone(dateOnly, KYIV_TZ, 'yyyy-MM-dd');
         const rates = await this.fetchRates(
           `${FRANKFURTER_BASE_URL}/${dateStr}`,
         );
@@ -76,9 +88,19 @@ export class CurrencyService {
 
     if (!eurToFrom) {
       eurToFrom = await this.getMostRecentEurRate(from);
+      if (eurToFrom) {
+        this.logger.warn(
+          `Using stale/fallback cached EUR rate for ${from} (most recent available, not for the requested date)`,
+        );
+      }
     }
     if (!eurToTo) {
       eurToTo = await this.getMostRecentEurRate(to);
+      if (eurToTo) {
+        this.logger.warn(
+          `Using stale/fallback cached EUR rate for ${to} (most recent available, not for the requested date)`,
+        );
+      }
     }
 
     if (!eurToFrom || !eurToTo) {
@@ -92,7 +114,7 @@ export class CurrencyService {
     return eurToTo.dividedBy(eurToFrom);
   }
 
-  @Cron('0 2 * * *', { timeZone: KYIV_TZ })
+  @Cron('0 2 * * *', { name: 'refreshDailyRates', timeZone: KYIV_TZ })
   async refreshDailyRates(): Promise<void> {
     const today = this.toKyivDateOnly(new Date());
     try {
@@ -149,15 +171,25 @@ export class CurrencyService {
   }
 
   private async fetchRates(baseUrl: string): Promise<Record<string, number>> {
-    const targets = SUPPORTED_CURRENCIES.filter(
+    const targetCurrencies = SUPPORTED_CURRENCIES.filter(
       (currency) => currency !== REFERENCE_CURRENCY,
-    ).join(',');
+    );
+    const targets = targetCurrencies.join(',');
     const url = `${baseUrl}?from=${REFERENCE_CURRENCY}&to=${targets}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) {
       throw new Error(`frankfurter.dev responded with ${res.status}`);
     }
     const body = (await res.json()) as FrankfurterResponse;
+    const returned = new Set(Object.keys(body.rates));
+    const missing = targetCurrencies.filter(
+      (currency) => !returned.has(currency),
+    );
+    if (missing.length > 0) {
+      this.logger.warn(
+        `frankfurter.dev response is missing requested currency codes: ${missing.join(', ')}`,
+      );
+    }
     return body.rates;
   }
 
@@ -175,13 +207,17 @@ export class CurrencyService {
           },
         },
         create: { date, fromCurrency: REFERENCE_CURRENCY, toCurrency, rate },
-        update: { rate },
+        update: { rate, fetchedAt: new Date() },
       });
     }
   }
 
   private toKyivDateOnly(date: Date): Date {
-    const dateStr = formatInTimeZone(date, KYIV_TZ, 'yyyy-MM-dd');
+    const dateStr = this.toKyivDateString(date);
     return new Date(`${dateStr}T00:00:00.000Z`);
+  }
+
+  private toKyivDateString(date: Date): string {
+    return formatInTimeZone(date, KYIV_TZ, 'yyyy-MM-dd');
   }
 }

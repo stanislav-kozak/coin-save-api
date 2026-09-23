@@ -1,6 +1,6 @@
 import { execSync } from 'child_process';
 import { HttpStatus } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
 import {
   PostgreSqlContainer,
@@ -9,11 +9,15 @@ import {
 import { CurrenciesModule } from '../../src/currencies/currencies.module';
 import { CurrencyService } from '../../src/currencies/currencies.service';
 import { PrismaModule } from '../../src/prisma/prisma.module';
+import { PrismaService } from '../../src/prisma/prisma.service';
 import { AppException } from '../../src/common/exceptions/app.exception';
+import { ERROR_CODES } from '../../src/common/constants/error-codes';
 
 describe('CurrencyService (integration)', () => {
   let container: StartedPostgreSqlContainer;
+  let moduleRef: TestingModule;
   let service: CurrencyService;
+  let prisma: PrismaService;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:17-alpine')
@@ -29,15 +33,21 @@ describe('CurrencyService (integration)', () => {
       stdio: 'inherit',
     });
 
-    const moduleRef = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       imports: [PrismaModule, CurrenciesModule],
     }).compile();
 
     service = moduleRef.get(CurrencyService);
+    prisma = moduleRef.get(PrismaService);
   }, 60_000);
 
   afterAll(async () => {
+    await moduleRef.close();
     await container.stop();
+  });
+
+  beforeEach(async () => {
+    await prisma.exchangeRate.deleteMany();
   });
 
   afterEach(() => {
@@ -105,6 +115,9 @@ describe('CurrencyService (integration)', () => {
       expect((error as AppException).getStatus()).toBe(
         HttpStatus.SERVICE_UNAVAILABLE,
       );
+      expect((error as AppException).getResponse()).toMatchObject({
+        code: ERROR_CODES.CURRENCY_API_UNAVAILABLE,
+      });
     }
   });
 
