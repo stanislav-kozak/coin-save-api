@@ -9,6 +9,7 @@ import { UsersModule } from './users/users.module';
 import { MailModule } from './mail/mail.module';
 import { AuthModule } from './auth/auth.module';
 import { SpacesModule } from './spaces/spaces.module';
+import { WalletsModule } from './wallets/wallets.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { SpacesModule } from './spaces/spaces.module';
     MailModule,
     AuthModule,
     SpacesModule,
+    WalletsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
