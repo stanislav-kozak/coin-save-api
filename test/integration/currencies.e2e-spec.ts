@@ -12,45 +12,12 @@ import { PrismaModule } from '../../src/prisma/prisma.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { AppException } from '../../src/common/exceptions/app.exception';
 import { ERROR_CODES } from '../../src/common/constants/error-codes';
-
-function frankfurterOk(rates: Record<string, number>) {
-  return { ok: true, status: 200, json: () => Promise.resolve({ rates }) };
-}
-
-function secondaryOk(rates: Partial<Record<'UAH' | 'RUB', number>>) {
-  const eur: Record<string, number> = {};
-  for (const [code, value] of Object.entries(rates)) {
-    eur[code.toLowerCase()] = value;
-  }
-  return {
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve({ date: '2026-06-15', eur }),
-  };
-}
-
-function failing(status = 503) {
-  return { ok: false, status };
-}
-
-function mockFetch(routes: {
-  frankfurter?: ReturnType<typeof frankfurterOk> | ReturnType<typeof failing>;
-  jsdelivr?: ReturnType<typeof secondaryOk> | ReturnType<typeof failing>;
-  cloudflare?: ReturnType<typeof secondaryOk> | ReturnType<typeof failing>;
-}) {
-  return vi.fn().mockImplementation((url: string) => {
-    if (url.includes('frankfurter.dev')) {
-      return Promise.resolve(routes.frankfurter ?? failing());
-    }
-    if (url.includes('jsdelivr.net')) {
-      return Promise.resolve(routes.jsdelivr ?? failing());
-    }
-    if (url.includes('currency-api.pages.dev')) {
-      return Promise.resolve(routes.cloudflare ?? failing());
-    }
-    throw new Error(`Unexpected fetch URL in test: ${url}`);
-  });
-}
+import {
+  frankfurterOk,
+  secondaryOk,
+  failing,
+  mockFetch,
+} from '../helpers/currency-fetch-mock';
 
 describe('CurrencyService (integration)', () => {
   let container: StartedPostgreSqlContainer;
