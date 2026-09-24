@@ -38,12 +38,12 @@ describe('WalletsController', () => {
   it('POST /spaces/:spaceId/wallets creates a wallet in the given space', async () => {
     await request(app.getHttpServer())
       .post('/spaces/s1/wallets')
-      .send({ name: 'Cash', currency: 'UAH', initialBalance: 100 })
+      .send({ name: 'Cash', currency: 'PLN', initialBalance: 100 })
       .expect(201);
 
     expect(walletsService.createWallet).toHaveBeenCalledWith('s1', {
       name: 'Cash',
-      currency: 'UAH',
+      currency: 'PLN',
       initialBalance: 100,
     });
   });
