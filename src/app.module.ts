@@ -13,6 +13,8 @@ import { SpacesModule } from './spaces/spaces.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CurrenciesModule } from './currencies/currencies.module';
+import { ExpensesModule } from './expenses/expenses.module';
+import { RecurringModule } from './recurring/recurring.module';
 
 @Module({
   imports: [
@@ -27,6 +29,8 @@ import { CurrenciesModule } from './currencies/currencies.module';
     WalletsModule,
     CategoriesModule,
     CurrenciesModule,
+    ExpensesModule,
+    RecurringModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
