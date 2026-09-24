@@ -84,9 +84,15 @@ export class CurrencyService {
     let eurToTo = await this.getCachedEurRate(to, dateOnly);
 
     if (!eurToFrom || !eurToTo) {
+      const needsSecondary = [from, to].some((currency) =>
+        (SECONDARY_PROVIDER_CURRENCIES as readonly string[]).includes(currency),
+      );
       try {
-        const rates = await this.fetchAllRates(dateStr);
-        await this.upsertRates(dateOnly, rates);
+        const { rates, sources } = await this.fetchAllRates(
+          dateStr,
+          needsSecondary,
+        );
+        await this.upsertRates(dateOnly, rates, sources);
         eurToFrom = eurToFrom ?? this.rateFromFetched(from, rates);
         eurToTo = eurToTo ?? this.rateFromFetched(to, rates);
       } catch (error) {
@@ -100,7 +106,7 @@ export class CurrencyService {
       eurToFrom = await this.getMostRecentEurRate(from);
       if (eurToFrom) {
         this.logger.warn(
-          `Using stale/fallback cached EUR rate for ${from} (most recent available, not for the requested date)`,
+          `Using stale/fallback cached EUR rate for ${from} (most recent available, requested date was ${dateStr})`,
         );
       }
     }
@@ -108,7 +114,7 @@ export class CurrencyService {
       eurToTo = await this.getMostRecentEurRate(to);
       if (eurToTo) {
         this.logger.warn(
-          `Using stale/fallback cached EUR rate for ${to} (most recent available, not for the requested date)`,
+          `Using stale/fallback cached EUR rate for ${to} (most recent available, requested date was ${dateStr})`,
         );
       }
     }
@@ -128,8 +134,8 @@ export class CurrencyService {
   async refreshDailyRates(): Promise<void> {
     const today = this.toKyivDateOnly(new Date());
     try {
-      const rates = await this.fetchAllRates('latest');
-      await this.upsertRates(today, rates);
+      const { rates, sources } = await this.fetchAllRates('latest', true);
+      await this.upsertRates(today, rates, sources);
     } catch (error) {
       this.logger.warn(
         `Failed to refresh daily exchange rates: ${(error as Error).message}`,
@@ -182,23 +188,40 @@ export class CurrencyService {
 
   private async fetchAllRates(
     dateSegment: string,
-  ): Promise<Record<string, number>> {
+    needsSecondary: boolean,
+  ): Promise<{
+    rates: Record<string, number>;
+    sources: Record<string, string>;
+  }> {
+    const secondaryPromise = needsSecondary
+      ? this.fetchSecondaryRates(dateSegment)
+      : Promise.resolve<Record<string, number>>({});
+
     const [frankfurterResult, secondaryResult] = await Promise.allSettled([
       this.fetchFrankfurterRates(dateSegment),
-      this.fetchSecondaryRates(dateSegment),
+      secondaryPromise,
     ]);
 
-    const combined: Record<string, number> = {};
+    const rates: Record<string, number> = {};
+    const sources: Record<string, string> = {};
+
     if (frankfurterResult.status === 'fulfilled') {
-      Object.assign(combined, frankfurterResult.value);
+      for (const [currency, rate] of Object.entries(frankfurterResult.value)) {
+        rates[currency] = rate;
+        sources[currency] = 'frankfurter.dev';
+      }
     } else {
       this.logger.warn(
         `frankfurter.dev fetch failed: ${(frankfurterResult.reason as Error).message}`,
       );
     }
+
     if (secondaryResult.status === 'fulfilled') {
-      Object.assign(combined, secondaryResult.value);
-    } else {
+      for (const [currency, rate] of Object.entries(secondaryResult.value)) {
+        rates[currency] = rate;
+        sources[currency] = 'fawazahmed0/currency-api';
+      }
+    } else if (needsSecondary) {
       this.logger.warn(
         `Secondary currency provider fetch failed: ${(secondaryResult.reason as Error).message}`,
       );
@@ -206,12 +229,12 @@ export class CurrencyService {
 
     if (
       frankfurterResult.status === 'rejected' &&
-      secondaryResult.status === 'rejected'
+      (!needsSecondary || secondaryResult.status === 'rejected')
     ) {
-      throw new Error('Both currency rate providers failed');
+      throw new Error('Currency rate providers failed');
     }
 
-    return combined;
+    return { rates, sources };
   }
 
   private async fetchFrankfurterRates(
@@ -275,14 +298,22 @@ export class CurrencyService {
         `secondary currency provider responded with ${res.status}`,
       );
     }
-    return (await res.json()) as SecondaryProviderResponse;
+    const body = (await res.json()) as SecondaryProviderResponse;
+    if (!body || typeof body.eur !== 'object' || body.eur === null) {
+      throw new Error(
+        'secondary currency provider returned an unexpected response shape',
+      );
+    }
+    return body;
   }
 
   private async upsertRates(
     date: Date,
     rates: Record<string, number>,
+    sources: Record<string, string>,
   ): Promise<void> {
     for (const [toCurrency, rate] of Object.entries(rates)) {
+      const source = sources[toCurrency] ?? 'frankfurter.dev';
       await this.prisma.exchangeRate.upsert({
         where: {
           date_fromCurrency_toCurrency: {
@@ -291,8 +322,14 @@ export class CurrencyService {
             toCurrency,
           },
         },
-        create: { date, fromCurrency: REFERENCE_CURRENCY, toCurrency, rate },
-        update: { rate, fetchedAt: new Date() },
+        create: {
+          date,
+          fromCurrency: REFERENCE_CURRENCY,
+          toCurrency,
+          rate,
+          source,
+        },
+        update: { rate, fetchedAt: new Date(), source },
       });
     }
   }
