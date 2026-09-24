@@ -5,14 +5,26 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
-import { SUPPORTED_CURRENCIES } from '../common/constants/currencies';
+import {
+  FRANKFURTER_CURRENCIES,
+  SECONDARY_PROVIDER_CURRENCIES,
+  SUPPORTED_CURRENCIES,
+} from '../common/constants/currencies';
 
 const KYIV_TZ = 'Europe/Kyiv';
 const FRANKFURTER_BASE_URL = 'https://api.frankfurter.dev/v1';
+const SECONDARY_JSDELIVR_BASE =
+  'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api';
+const SECONDARY_CLOUDFLARE_HOST_SUFFIX = 'currency-api.pages.dev';
 const REFERENCE_CURRENCY = 'EUR';
 
 interface FrankfurterResponse {
   rates: Record<string, number>;
+}
+
+interface SecondaryProviderResponse {
+  date: string;
+  eur: Record<string, number>;
 }
 
 @Injectable()
@@ -73,9 +85,7 @@ export class CurrencyService {
 
     if (!eurToFrom || !eurToTo) {
       try {
-        const rates = await this.fetchRates(
-          `${FRANKFURTER_BASE_URL}/${dateStr}`,
-        );
+        const rates = await this.fetchAllRates(dateStr);
         await this.upsertRates(dateOnly, rates);
         eurToFrom = eurToFrom ?? this.rateFromFetched(from, rates);
         eurToTo = eurToTo ?? this.rateFromFetched(to, rates);
@@ -118,7 +128,7 @@ export class CurrencyService {
   async refreshDailyRates(): Promise<void> {
     const today = this.toKyivDateOnly(new Date());
     try {
-      const rates = await this.fetchRates(`${FRANKFURTER_BASE_URL}/latest`);
+      const rates = await this.fetchAllRates('latest');
       await this.upsertRates(today, rates);
     } catch (error) {
       this.logger.warn(
@@ -170,27 +180,102 @@ export class CurrencyService {
     return row?.rate ?? null;
   }
 
-  private async fetchRates(baseUrl: string): Promise<Record<string, number>> {
-    const targetCurrencies = SUPPORTED_CURRENCIES.filter(
+  private async fetchAllRates(
+    dateSegment: string,
+  ): Promise<Record<string, number>> {
+    const [frankfurterResult, secondaryResult] = await Promise.allSettled([
+      this.fetchFrankfurterRates(dateSegment),
+      this.fetchSecondaryRates(dateSegment),
+    ]);
+
+    const combined: Record<string, number> = {};
+    if (frankfurterResult.status === 'fulfilled') {
+      Object.assign(combined, frankfurterResult.value);
+    } else {
+      this.logger.warn(
+        `frankfurter.dev fetch failed: ${(frankfurterResult.reason as Error).message}`,
+      );
+    }
+    if (secondaryResult.status === 'fulfilled') {
+      Object.assign(combined, secondaryResult.value);
+    } else {
+      this.logger.warn(
+        `Secondary currency provider fetch failed: ${(secondaryResult.reason as Error).message}`,
+      );
+    }
+
+    if (
+      frankfurterResult.status === 'rejected' &&
+      secondaryResult.status === 'rejected'
+    ) {
+      throw new Error('Both currency rate providers failed');
+    }
+
+    return combined;
+  }
+
+  private async fetchFrankfurterRates(
+    dateSegment: string,
+  ): Promise<Record<string, number>> {
+    const targets = FRANKFURTER_CURRENCIES.filter(
       (currency) => currency !== REFERENCE_CURRENCY,
     );
-    const targets = targetCurrencies.join(',');
-    const url = `${baseUrl}?from=${REFERENCE_CURRENCY}&to=${targets}`;
+    const url = `${FRANKFURTER_BASE_URL}/${dateSegment}?from=${REFERENCE_CURRENCY}&to=${targets.join(',')}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) {
       throw new Error(`frankfurter.dev responded with ${res.status}`);
     }
     const body = (await res.json()) as FrankfurterResponse;
     const returned = new Set(Object.keys(body.rates));
-    const missing = targetCurrencies.filter(
-      (currency) => !returned.has(currency),
-    );
+    const missing = targets.filter((currency) => !returned.has(currency));
     if (missing.length > 0) {
       this.logger.warn(
         `frankfurter.dev response is missing requested currency codes: ${missing.join(', ')}`,
       );
     }
     return body.rates;
+  }
+
+  private async fetchSecondaryRates(
+    dateSegment: string,
+  ): Promise<Record<string, number>> {
+    const jsdelivrUrl = `${SECONDARY_JSDELIVR_BASE}@${dateSegment}/v1/currencies/eur.json`;
+    const cloudflareUrl = `https://${dateSegment}.${SECONDARY_CLOUDFLARE_HOST_SUFFIX}/v1/currencies/eur.json`;
+
+    let body: SecondaryProviderResponse;
+    try {
+      body = await this.fetchSecondaryJson(jsdelivrUrl);
+    } catch (jsdelivrError) {
+      this.logger.warn(
+        `Secondary provider jsdelivr host failed (${(jsdelivrError as Error).message}), trying Cloudflare fallback`,
+      );
+      body = await this.fetchSecondaryJson(cloudflareUrl);
+    }
+
+    const rates: Record<string, number> = {};
+    for (const currency of SECONDARY_PROVIDER_CURRENCIES) {
+      const value = body.eur[currency.toLowerCase()];
+      if (value === undefined) {
+        this.logger.warn(
+          `Secondary currency provider response is missing requested currency code: ${currency}`,
+        );
+        continue;
+      }
+      rates[currency] = value;
+    }
+    return rates;
+  }
+
+  private async fetchSecondaryJson(
+    url: string,
+  ): Promise<SecondaryProviderResponse> {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) {
+      throw new Error(
+        `secondary currency provider responded with ${res.status}`,
+      );
+    }
+    return (await res.json()) as SecondaryProviderResponse;
   }
 
   private async upsertRates(
