@@ -85,7 +85,7 @@ model Space {
   slug            String   @unique
   ownerId         String
   owner           User     @relation("SpaceOwner", fields: [ownerId], references: [id])
-  primaryCurrency String   @default("UAH")
+  primaryCurrency String   @default("EUR")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

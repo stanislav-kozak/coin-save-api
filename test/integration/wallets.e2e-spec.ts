@@ -100,7 +100,7 @@ describe('Wallets flow (integration)', () => {
 
     const createRes = await agent
       .post(`/api/spaces/${spaceId}/wallets`)
-      .send({ name: 'Cash', currency: 'UAH', initialBalance: 1000 })
+      .send({ name: 'Cash', currency: 'PLN', initialBalance: 1000 })
       .expect(201);
     const walletId = createRes.body.id as string;
     expect(Number(createRes.body.balance)).toBe(1000);
@@ -112,7 +112,7 @@ describe('Wallets flow (integration)', () => {
         walletId,
         type: TransactionType.INCOME,
         amount: 200,
-        walletCurrency: 'UAH',
+        walletCurrency: 'PLN',
         amountInPrimary: 200,
         fxRate: 1,
         occurredAt: new Date(),
@@ -125,7 +125,7 @@ describe('Wallets flow (integration)', () => {
         walletId,
         type: TransactionType.EXPENSE,
         amount: 150,
-        walletCurrency: 'UAH',
+        walletCurrency: 'PLN',
         amountInPrimary: 150,
         fxRate: 1,
         occurredAt: new Date(),

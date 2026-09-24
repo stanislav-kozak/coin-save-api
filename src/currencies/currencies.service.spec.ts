@@ -47,7 +47,7 @@ describe('CurrencyService', () => {
     vi.stubGlobal('fetch', fetchSpy);
     const { service, prisma } = buildService();
 
-    const rate = await service.getRate('UAH', 'UAH', new Date('2026-06-15'));
+    const rate = await service.getRate('PLN', 'PLN', new Date('2026-06-15'));
 
     expect(rate.toNumber()).toBe(1);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -67,7 +67,7 @@ describe('CurrencyService', () => {
       },
     });
 
-    const rate = await service.getRate('EUR', 'UAH', new Date('2026-06-15'));
+    const rate = await service.getRate('EUR', 'PLN', new Date('2026-06-15'));
 
     expect(rate.toNumber()).toBe(45.5);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -82,7 +82,7 @@ describe('CurrencyService', () => {
       if (key.fromCurrency === 'EUR' && key.toCurrency === 'USD') {
         return Promise.resolve({ rate: new Prisma.Decimal('1.1') });
       }
-      if (key.fromCurrency === 'EUR' && key.toCurrency === 'UAH') {
+      if (key.fromCurrency === 'EUR' && key.toCurrency === 'PLN') {
         return Promise.resolve({ rate: new Prisma.Decimal('45.1') });
       }
       return Promise.resolve(null);
@@ -91,18 +91,18 @@ describe('CurrencyService', () => {
       prisma: { exchangeRate: { findUnique } },
     });
 
-    const rate = await service.getRate('USD', 'UAH', new Date('2026-06-15'));
+    const rate = await service.getRate('USD', 'PLN', new Date('2026-06-15'));
 
     expect(rate.toNumber()).toBeCloseTo(45.1 / 1.1, 8);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('fetches and upserts historical rates on a cache miss, then returns the computed cross rate', async () => {
-    const fetchSpy = fetchOk({ USD: 1.1, UAH: 45.2 });
+    const fetchSpy = fetchOk({ USD: 1.1, PLN: 45.2 });
     vi.stubGlobal('fetch', fetchSpy);
     const { service, prisma } = buildService();
 
-    const rate = await service.getRate('USD', 'UAH', new Date('2026-06-15'));
+    const rate = await service.getRate('USD', 'PLN', new Date('2026-06-15'));
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const calledUrl = fetchSpy.mock.calls[0][0] as string;
@@ -191,9 +191,9 @@ describe('CurrencyService', () => {
   it('supportedCurrencies returns the whitelist', () => {
     const { service } = buildService();
 
-    expect(service.supportedCurrencies()).toContain('UAH');
+    expect(service.supportedCurrencies()).toContain('PLN');
     expect(service.supportedCurrencies()).toContain('EUR');
-    expect(service.supportedCurrencies().length).toBe(15);
+    expect(service.supportedCurrencies().length).toBe(11);
   });
 
   it('refreshDailyRates fetches latest rates and upserts them without throwing on failure', async () => {

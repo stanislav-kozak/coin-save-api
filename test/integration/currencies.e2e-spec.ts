@@ -58,7 +58,7 @@ describe('CurrencyService (integration)', () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);
 
-    const rate = await service.getRate('UAH', 'UAH', new Date('2026-06-15'));
+    const rate = await service.getRate('PLN', 'PLN', new Date('2026-06-15'));
 
     expect(rate.toNumber()).toBe(1);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -68,17 +68,17 @@ describe('CurrencyService (integration)', () => {
     const fetchSpy = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: () => Promise.resolve({ rates: { USD: 1.1, UAH: 45.2 } }),
+      json: () => Promise.resolve({ rates: { USD: 1.1, PLN: 45.2 } }),
     });
     vi.stubGlobal('fetch', fetchSpy);
 
-    const rate = await service.getRate('USD', 'UAH', new Date('2026-06-15'));
+    const rate = await service.getRate('USD', 'PLN', new Date('2026-06-15'));
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(rate.toNumber()).toBeCloseTo(45.2 / 1.1, 6);
 
     const cachedRate = await service.getRate(
       'USD',
-      'UAH',
+      'PLN',
       new Date('2026-06-15'),
     );
     expect(fetchSpy).toHaveBeenCalledTimes(1);
