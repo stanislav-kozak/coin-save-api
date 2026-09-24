@@ -211,6 +211,27 @@ describe('ExpensesService', () => {
         });
       }
     });
+
+    it('throws INVALID_OCCURRED_AT when occurredAt does not parse to a valid date', async () => {
+      const { service } = buildService();
+
+      try {
+        await service.createExpense('s1', 'u1', {
+          walletId: 'w1',
+          type: TransactionType.EXPENSE,
+          amount: 10,
+          occurredAt: 'not-a-date',
+        });
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(
+          HttpStatus.BAD_REQUEST,
+        );
+        expect((error as AppException).getResponse()).toMatchObject({
+          code: 'INVALID_OCCURRED_AT',
+        });
+      }
+    });
   });
 
   describe('listExpenses', () => {
@@ -234,11 +255,26 @@ describe('ExpensesService', () => {
           type: TransactionType.EXPENSE,
           occurredAt: {
             gte: new Date('2026-06-01T00:00:00.000Z'),
-            lte: new Date('2026-06-30T00:00:00.000Z'),
+            lte: new Date('2026-06-30T23:59:59.999Z'),
           },
         },
         orderBy: { occurredAt: 'desc' },
       });
+    });
+
+    it('treats a date-only `to` filter as inclusive of the entire day', async () => {
+      const { service, prisma } = buildService();
+      prisma.expense.findMany.mockResolvedValue([]);
+
+      await service.listExpenses('s1', { to: '2026-06-30' });
+
+      const where = prisma.expense.findMany.mock.calls[0][0].where;
+      expect(where.occurredAt.lte).toEqual(
+        new Date('2026-06-30T23:59:59.999Z'),
+      );
+      expect(where.occurredAt.lte).not.toEqual(
+        new Date('2026-06-30T00:00:00.000Z'),
+      );
     });
 
     it('omits absent filters from the where clause', async () => {

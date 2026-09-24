@@ -51,11 +51,13 @@ export class ExpensesService {
     }
     const space = await this.findSpaceOrThrow(spaceId);
 
-    const fxRate = await this.currencyService.getRate(
-      wallet.currency,
-      space.primaryCurrency,
-      occurredAt,
-    );
+    const fxRate = (
+      await this.currencyService.getRate(
+        wallet.currency,
+        space.primaryCurrency,
+        occurredAt,
+      )
+    ).toDecimalPlaces(8);
     const amountInPrimary = new Prisma.Decimal(input.amount).times(fxRate);
 
     return this.prisma.expense.create({
@@ -83,7 +85,7 @@ export class ExpensesService {
       filter.from || filter.to
         ? {
             ...(filter.from ? { gte: new Date(filter.from) } : {}),
-            ...(filter.to ? { lte: new Date(filter.to) } : {}),
+            ...(filter.to ? { lte: this.endOfUtcDay(filter.to) } : {}),
           }
         : undefined;
 
@@ -137,11 +139,13 @@ export class ExpensesService {
       const effectiveOccurredAt = occurredAt ?? existing.occurredAt;
       const effectiveAmount = input.amount ?? existing.amount;
 
-      fxRate = await this.currencyService.getRate(
-        effectiveWalletCurrency,
-        space.primaryCurrency,
-        effectiveOccurredAt,
-      );
+      fxRate = (
+        await this.currencyService.getRate(
+          effectiveWalletCurrency,
+          space.primaryCurrency,
+          effectiveOccurredAt,
+        )
+      ).toDecimalPlaces(8);
       amountInPrimary = new Prisma.Decimal(effectiveAmount).times(fxRate);
     }
 
@@ -167,6 +171,13 @@ export class ExpensesService {
 
   private parseAndValidateOccurredAt(occurredAt: string): Date {
     const date = new Date(occurredAt);
+    if (Number.isNaN(date.getTime())) {
+      throw new AppException(
+        ERROR_CODES.INVALID_OCCURRED_AT,
+        HttpStatus.BAD_REQUEST,
+        'occurredAt is not a valid date',
+      );
+    }
     const now = new Date();
     if (date.getTime() > now.getTime()) {
       throw new AppException(
@@ -185,6 +196,21 @@ export class ExpensesService {
       );
     }
     return date;
+  }
+
+  private endOfUtcDay(isoString: string): Date {
+    const date = new Date(isoString);
+    return new Date(
+      Date.UTC(
+        date.getUTCFullYear(),
+        date.getUTCMonth(),
+        date.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
   }
 
   private async assertWalletInSpace(

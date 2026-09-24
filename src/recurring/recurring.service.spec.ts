@@ -136,4 +136,42 @@ describe('RecurringService', () => {
       });
     }
   });
+
+  it('throws INVALID_RECURRING_DATE_RANGE when endDate is before startDate', async () => {
+    const { service, prisma } = buildService();
+
+    try {
+      await service.createRecurringTransaction('s1', 'u1', {
+        ...baseInput,
+        startDate: '2026-07-01T00:00:00.000Z',
+        endDate: '2026-06-01T00:00:00.000Z',
+      });
+      throw new Error('expected rejection');
+    } catch (error) {
+      expect((error as AppException).getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      expect((error as AppException).getResponse()).toMatchObject({
+        code: 'INVALID_RECURRING_DATE_RANGE',
+      });
+    }
+    expect(prisma.recurringTransaction.create).not.toHaveBeenCalled();
+  });
+
+  it('throws INVALID_RECURRING_DATE_RANGE when endDate equals startDate', async () => {
+    const { service, prisma } = buildService();
+
+    try {
+      await service.createRecurringTransaction('s1', 'u1', {
+        ...baseInput,
+        startDate: '2026-07-01T00:00:00.000Z',
+        endDate: '2026-07-01T00:00:00.000Z',
+      });
+      throw new Error('expected rejection');
+    } catch (error) {
+      expect((error as AppException).getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      expect((error as AppException).getResponse()).toMatchObject({
+        code: 'INVALID_RECURRING_DATE_RANGE',
+      });
+    }
+    expect(prisma.recurringTransaction.create).not.toHaveBeenCalled();
+  });
 });

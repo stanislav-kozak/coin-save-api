@@ -35,6 +35,16 @@ export class RecurringService {
       await this.assertCategoryInSpace(spaceId, input.categoryId);
     }
 
+    const startDate = new Date(input.startDate);
+    const endDate = input.endDate ? new Date(input.endDate) : undefined;
+    if (endDate && endDate.getTime() <= startDate.getTime()) {
+      throw new AppException(
+        ERROR_CODES.INVALID_RECURRING_DATE_RANGE,
+        HttpStatus.BAD_REQUEST,
+        'endDate must be after startDate',
+      );
+    }
+
     return this.prisma.recurringTransaction.create({
       data: {
         spaceId,
@@ -47,8 +57,8 @@ export class RecurringService {
         note: input.note,
         frequency: input.frequency,
         dayOfMonth: input.dayOfMonth,
-        startDate: new Date(input.startDate),
-        endDate: input.endDate ? new Date(input.endDate) : undefined,
+        startDate,
+        endDate,
         createdById,
       },
     });

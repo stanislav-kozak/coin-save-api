@@ -129,4 +129,25 @@ describe('ExpensesController', () => {
       })
       .expect(400);
   });
+
+  it('PATCH rejects a null walletId with 400 instead of a 500 from Prisma', async () => {
+    await request(app.getHttpServer())
+      .patch('/spaces/s1/expenses/e1')
+      .send({ walletId: null })
+      .expect(400);
+  });
+
+  it('PATCH rejects a null amount with 400 instead of a 500 from Prisma', async () => {
+    await request(app.getHttpServer())
+      .patch('/spaces/s1/expenses/e1')
+      .send({ amount: null })
+      .expect(400);
+  });
+
+  it('PATCH rejects a null occurredAt with 400 instead of a 500 from Prisma', async () => {
+    await request(app.getHttpServer())
+      .patch('/spaces/s1/expenses/e1')
+      .send({ occurredAt: null })
+      .expect(400);
+  });
 });
