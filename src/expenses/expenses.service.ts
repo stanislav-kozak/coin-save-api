@@ -24,6 +24,14 @@ export interface ListExpensesFilter {
   to?: string;
 }
 
+export interface UpdateExpenseInput {
+  walletId?: string;
+  categoryId?: string;
+  amount?: number;
+  occurredAt?: string;
+  note?: string;
+}
+
 @Injectable()
 export class ExpensesService {
   constructor(
@@ -93,6 +101,68 @@ export class ExpensesService {
 
   getExpense(spaceId: string, expenseId: string): Promise<Expense> {
     return this.findExpenseOrThrow(spaceId, expenseId);
+  }
+
+  async updateExpense(
+    spaceId: string,
+    expenseId: string,
+    input: UpdateExpenseInput,
+  ): Promise<Expense> {
+    const existing = await this.findExpenseOrThrow(spaceId, expenseId);
+
+    if (input.categoryId) {
+      await this.assertCategoryInSpace(spaceId, input.categoryId);
+    }
+
+    let walletCurrency: string | undefined;
+    if (input.walletId) {
+      const wallet = await this.assertWalletInSpace(spaceId, input.walletId);
+      walletCurrency = wallet.currency;
+    }
+
+    const occurredAt = input.occurredAt
+      ? this.parseAndValidateOccurredAt(input.occurredAt)
+      : undefined;
+
+    const needsFxRecompute =
+      input.amount !== undefined ||
+      occurredAt !== undefined ||
+      walletCurrency !== undefined;
+
+    let amountInPrimary: Prisma.Decimal | undefined;
+    let fxRate: Prisma.Decimal | undefined;
+    if (needsFxRecompute) {
+      const space = await this.findSpaceOrThrow(spaceId);
+      const effectiveWalletCurrency = walletCurrency ?? existing.walletCurrency;
+      const effectiveOccurredAt = occurredAt ?? existing.occurredAt;
+      const effectiveAmount = input.amount ?? existing.amount;
+
+      fxRate = await this.currencyService.getRate(
+        effectiveWalletCurrency,
+        space.primaryCurrency,
+        effectiveOccurredAt,
+      );
+      amountInPrimary = new Prisma.Decimal(effectiveAmount).times(fxRate);
+    }
+
+    return this.prisma.expense.update({
+      where: { id: expenseId },
+      data: {
+        walletId: input.walletId,
+        categoryId: input.categoryId,
+        amount: input.amount,
+        walletCurrency,
+        amountInPrimary,
+        fxRate,
+        note: input.note,
+        occurredAt,
+      },
+    });
+  }
+
+  async deleteExpense(spaceId: string, expenseId: string): Promise<void> {
+    await this.findExpenseOrThrow(spaceId, expenseId);
+    await this.prisma.expense.delete({ where: { id: expenseId } });
   }
 
   private parseAndValidateOccurredAt(occurredAt: string): Date {

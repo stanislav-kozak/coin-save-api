@@ -294,4 +294,202 @@ describe('ExpensesService', () => {
       }
     });
   });
+
+  describe('updateExpense', () => {
+    const baseExpense = {
+      id: 'e1',
+      spaceId: 's1',
+      walletId: 'w1',
+      categoryId: 'c1',
+      type: TransactionType.EXPENSE,
+      amount: new Prisma.Decimal(100),
+      walletCurrency: 'USD',
+      amountInPrimary: new Prisma.Decimal(110),
+      fxRate: new Prisma.Decimal('1.1'),
+      note: 'Old note',
+      occurredAt: new Date('2026-06-10T00:00:00.000Z'),
+    };
+
+    it('updates note without recomputing fxRate/amountInPrimary', async () => {
+      const { service, prisma, getRate } = buildService();
+      prisma.expense.findUnique.mockResolvedValue(baseExpense);
+      prisma.expense.update.mockResolvedValue({
+        ...baseExpense,
+        note: 'New note',
+      });
+
+      await service.updateExpense('s1', 'e1', { note: 'New note' });
+
+      expect(getRate).not.toHaveBeenCalled();
+      expect(prisma.expense.update).toHaveBeenCalledWith({
+        where: { id: 'e1' },
+        data: {
+          walletId: undefined,
+          categoryId: undefined,
+          amount: undefined,
+          walletCurrency: undefined,
+          amountInPrimary: undefined,
+          fxRate: undefined,
+          note: 'New note',
+          occurredAt: undefined,
+        },
+      });
+    });
+
+    it('recomputes fxRate/amountInPrimary when amount changes', async () => {
+      const { service, prisma, getRate } = buildService();
+      prisma.expense.findUnique.mockResolvedValue(baseExpense);
+      prisma.expense.update.mockResolvedValue(baseExpense);
+
+      await service.updateExpense('s1', 'e1', { amount: 200 });
+
+      expect(getRate).toHaveBeenCalledWith(
+        'USD',
+        'EUR',
+        baseExpense.occurredAt,
+      );
+      const updateData = prisma.expense.update.mock.calls[0][0].data;
+      expect(updateData.amount).toBe(200);
+      expect((updateData.amountInPrimary as Prisma.Decimal).toNumber()).toBe(
+        220,
+      );
+      expect((updateData.fxRate as Prisma.Decimal).toNumber()).toBe(1.1);
+    });
+
+    it('recomputes fxRate/amountInPrimary when occurredAt changes', async () => {
+      const { service, prisma, getRate } = buildService();
+      prisma.expense.findUnique.mockResolvedValue(baseExpense);
+      prisma.expense.update.mockResolvedValue(baseExpense);
+
+      await service.updateExpense('s1', 'e1', {
+        occurredAt: '2026-06-12T00:00:00.000Z',
+      });
+
+      expect(getRate).toHaveBeenCalledWith(
+        'USD',
+        'EUR',
+        new Date('2026-06-12T00:00:00.000Z'),
+      );
+    });
+
+    it('re-snapshots walletCurrency and recomputes when walletId changes', async () => {
+      const { service, prisma, getRate } = buildService({
+        prisma: {
+          wallet: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: 'w2',
+              spaceId: 's1',
+              currency: 'PLN',
+            }),
+          },
+        },
+      });
+      prisma.expense.findUnique.mockResolvedValue(baseExpense);
+      prisma.expense.update.mockResolvedValue(baseExpense);
+
+      await service.updateExpense('s1', 'e1', { walletId: 'w2' });
+
+      expect(getRate).toHaveBeenCalledWith(
+        'PLN',
+        'EUR',
+        baseExpense.occurredAt,
+      );
+      const updateData = prisma.expense.update.mock.calls[0][0].data;
+      expect(updateData.walletCurrency).toBe('PLN');
+    });
+
+    it('rejects an occurredAt update that is in the future', async () => {
+      const { service, prisma } = buildService();
+      prisma.expense.findUnique.mockResolvedValue(baseExpense);
+
+      try {
+        await service.updateExpense('s1', 'e1', {
+          occurredAt: '2026-06-16T00:00:00.000Z',
+        });
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(
+          HttpStatus.BAD_REQUEST,
+        );
+        expect((error as AppException).getResponse()).toMatchObject({
+          code: 'INVALID_OCCURRED_AT',
+        });
+      }
+    });
+
+    it('throws WALLET_NOT_FOUND when the new walletId does not belong to the space', async () => {
+      const { service, prisma } = buildService({
+        prisma: {
+          wallet: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: 'w2',
+              spaceId: 'other',
+              currency: 'PLN',
+            }),
+          },
+        },
+      });
+      prisma.expense.findUnique.mockResolvedValue(baseExpense);
+
+      try {
+        await service.updateExpense('s1', 'e1', { walletId: 'w2' });
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(HttpStatus.NOT_FOUND);
+        expect((error as AppException).getResponse()).toMatchObject({
+          code: 'WALLET_NOT_FOUND',
+        });
+      }
+    });
+
+    it('throws EXPENSE_NOT_FOUND when the expense belongs to a different space', async () => {
+      const { service, prisma } = buildService();
+      prisma.expense.findUnique.mockResolvedValue({
+        ...baseExpense,
+        spaceId: 'other',
+      });
+
+      try {
+        await service.updateExpense('s1', 'e1', { note: 'x' });
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(HttpStatus.NOT_FOUND);
+        expect((error as AppException).getResponse()).toMatchObject({
+          code: 'EXPENSE_NOT_FOUND',
+        });
+      }
+    });
+  });
+
+  describe('deleteExpense', () => {
+    it('deletes the expense when it belongs to the space', async () => {
+      const { service, prisma } = buildService();
+      prisma.expense.findUnique.mockResolvedValue({ id: 'e1', spaceId: 's1' });
+      prisma.expense.delete.mockResolvedValue({ id: 'e1' });
+
+      await service.deleteExpense('s1', 'e1');
+
+      expect(prisma.expense.delete).toHaveBeenCalledWith({
+        where: { id: 'e1' },
+      });
+    });
+
+    it('throws EXPENSE_NOT_FOUND when the expense belongs to a different space', async () => {
+      const { service, prisma } = buildService();
+      prisma.expense.findUnique.mockResolvedValue({
+        id: 'e1',
+        spaceId: 'other',
+      });
+
+      try {
+        await service.deleteExpense('s1', 'e1');
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(HttpStatus.NOT_FOUND);
+        expect((error as AppException).getResponse()).toMatchObject({
+          code: 'EXPENSE_NOT_FOUND',
+        });
+      }
+    });
+  });
 });
