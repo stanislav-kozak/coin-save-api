@@ -5,14 +5,26 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
-import { SUPPORTED_CURRENCIES } from '../common/constants/currencies';
+import {
+  FRANKFURTER_CURRENCIES,
+  SECONDARY_PROVIDER_CURRENCIES,
+  SUPPORTED_CURRENCIES,
+} from '../common/constants/currencies';
 
 const KYIV_TZ = 'Europe/Kyiv';
 const FRANKFURTER_BASE_URL = 'https://api.frankfurter.dev/v1';
+const SECONDARY_JSDELIVR_BASE =
+  'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api';
+const SECONDARY_CLOUDFLARE_HOST_SUFFIX = 'currency-api.pages.dev';
 const REFERENCE_CURRENCY = 'EUR';
 
 interface FrankfurterResponse {
   rates: Record<string, number>;
+}
+
+interface SecondaryProviderResponse {
+  date: string;
+  eur: Record<string, number>;
 }
 
 @Injectable()
@@ -72,11 +84,15 @@ export class CurrencyService {
     let eurToTo = await this.getCachedEurRate(to, dateOnly);
 
     if (!eurToFrom || !eurToTo) {
+      const needsSecondary = [from, to].some((currency) =>
+        (SECONDARY_PROVIDER_CURRENCIES as readonly string[]).includes(currency),
+      );
       try {
-        const rates = await this.fetchRates(
-          `${FRANKFURTER_BASE_URL}/${dateStr}`,
+        const { rates, sources } = await this.fetchAllRates(
+          dateStr,
+          needsSecondary,
         );
-        await this.upsertRates(dateOnly, rates);
+        await this.upsertRates(dateOnly, rates, sources);
         eurToFrom = eurToFrom ?? this.rateFromFetched(from, rates);
         eurToTo = eurToTo ?? this.rateFromFetched(to, rates);
       } catch (error) {
@@ -90,7 +106,7 @@ export class CurrencyService {
       eurToFrom = await this.getMostRecentEurRate(from);
       if (eurToFrom) {
         this.logger.warn(
-          `Using stale/fallback cached EUR rate for ${from} (most recent available, not for the requested date)`,
+          `Using stale/fallback cached EUR rate for ${from} (most recent available, requested date was ${dateStr})`,
         );
       }
     }
@@ -98,7 +114,7 @@ export class CurrencyService {
       eurToTo = await this.getMostRecentEurRate(to);
       if (eurToTo) {
         this.logger.warn(
-          `Using stale/fallback cached EUR rate for ${to} (most recent available, not for the requested date)`,
+          `Using stale/fallback cached EUR rate for ${to} (most recent available, requested date was ${dateStr})`,
         );
       }
     }
@@ -118,8 +134,8 @@ export class CurrencyService {
   async refreshDailyRates(): Promise<void> {
     const today = this.toKyivDateOnly(new Date());
     try {
-      const rates = await this.fetchRates(`${FRANKFURTER_BASE_URL}/latest`);
-      await this.upsertRates(today, rates);
+      const { rates, sources } = await this.fetchAllRates('latest', true);
+      await this.upsertRates(today, rates, sources);
     } catch (error) {
       this.logger.warn(
         `Failed to refresh daily exchange rates: ${(error as Error).message}`,
@@ -170,21 +186,71 @@ export class CurrencyService {
     return row?.rate ?? null;
   }
 
-  private async fetchRates(baseUrl: string): Promise<Record<string, number>> {
-    const targetCurrencies = SUPPORTED_CURRENCIES.filter(
+  private async fetchAllRates(
+    dateSegment: string,
+    needsSecondary: boolean,
+  ): Promise<{
+    rates: Record<string, number>;
+    sources: Record<string, string>;
+  }> {
+    const secondaryPromise = needsSecondary
+      ? this.fetchSecondaryRates(dateSegment)
+      : Promise.resolve<Record<string, number>>({});
+
+    const [frankfurterResult, secondaryResult] = await Promise.allSettled([
+      this.fetchFrankfurterRates(dateSegment),
+      secondaryPromise,
+    ]);
+
+    const rates: Record<string, number> = {};
+    const sources: Record<string, string> = {};
+
+    if (frankfurterResult.status === 'fulfilled') {
+      for (const [currency, rate] of Object.entries(frankfurterResult.value)) {
+        rates[currency] = rate;
+        sources[currency] = 'frankfurter.dev';
+      }
+    } else {
+      this.logger.warn(
+        `frankfurter.dev fetch failed: ${(frankfurterResult.reason as Error).message}`,
+      );
+    }
+
+    if (secondaryResult.status === 'fulfilled') {
+      for (const [currency, rate] of Object.entries(secondaryResult.value)) {
+        rates[currency] = rate;
+        sources[currency] = 'fawazahmed0/currency-api';
+      }
+    } else if (needsSecondary) {
+      this.logger.warn(
+        `Secondary currency provider fetch failed: ${(secondaryResult.reason as Error).message}`,
+      );
+    }
+
+    if (
+      frankfurterResult.status === 'rejected' &&
+      (!needsSecondary || secondaryResult.status === 'rejected')
+    ) {
+      throw new Error('Currency rate providers failed');
+    }
+
+    return { rates, sources };
+  }
+
+  private async fetchFrankfurterRates(
+    dateSegment: string,
+  ): Promise<Record<string, number>> {
+    const targets = FRANKFURTER_CURRENCIES.filter(
       (currency) => currency !== REFERENCE_CURRENCY,
     );
-    const targets = targetCurrencies.join(',');
-    const url = `${baseUrl}?from=${REFERENCE_CURRENCY}&to=${targets}`;
+    const url = `${FRANKFURTER_BASE_URL}/${dateSegment}?from=${REFERENCE_CURRENCY}&to=${targets.join(',')}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
     if (!res.ok) {
       throw new Error(`frankfurter.dev responded with ${res.status}`);
     }
     const body = (await res.json()) as FrankfurterResponse;
     const returned = new Set(Object.keys(body.rates));
-    const missing = targetCurrencies.filter(
-      (currency) => !returned.has(currency),
-    );
+    const missing = targets.filter((currency) => !returned.has(currency));
     if (missing.length > 0) {
       this.logger.warn(
         `frankfurter.dev response is missing requested currency codes: ${missing.join(', ')}`,
@@ -193,11 +259,61 @@ export class CurrencyService {
     return body.rates;
   }
 
+  private async fetchSecondaryRates(
+    dateSegment: string,
+  ): Promise<Record<string, number>> {
+    const jsdelivrUrl = `${SECONDARY_JSDELIVR_BASE}@${dateSegment}/v1/currencies/eur.json`;
+    const cloudflareUrl = `https://${dateSegment}.${SECONDARY_CLOUDFLARE_HOST_SUFFIX}/v1/currencies/eur.json`;
+
+    let body: SecondaryProviderResponse;
+    try {
+      body = await this.fetchSecondaryJson(jsdelivrUrl);
+    } catch (jsdelivrError) {
+      this.logger.warn(
+        `Secondary provider jsdelivr host failed (${(jsdelivrError as Error).message}), trying Cloudflare fallback`,
+      );
+      body = await this.fetchSecondaryJson(cloudflareUrl);
+    }
+
+    const rates: Record<string, number> = {};
+    for (const currency of SECONDARY_PROVIDER_CURRENCIES) {
+      const value = body.eur[currency.toLowerCase()];
+      if (value === undefined) {
+        this.logger.warn(
+          `Secondary currency provider response is missing requested currency code: ${currency}`,
+        );
+        continue;
+      }
+      rates[currency] = value;
+    }
+    return rates;
+  }
+
+  private async fetchSecondaryJson(
+    url: string,
+  ): Promise<SecondaryProviderResponse> {
+    const res = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) {
+      throw new Error(
+        `secondary currency provider responded with ${res.status}`,
+      );
+    }
+    const body = (await res.json()) as SecondaryProviderResponse;
+    if (!body || typeof body.eur !== 'object' || body.eur === null) {
+      throw new Error(
+        'secondary currency provider returned an unexpected response shape',
+      );
+    }
+    return body;
+  }
+
   private async upsertRates(
     date: Date,
     rates: Record<string, number>,
+    sources: Record<string, string>,
   ): Promise<void> {
     for (const [toCurrency, rate] of Object.entries(rates)) {
+      const source = sources[toCurrency] ?? 'frankfurter.dev';
       await this.prisma.exchangeRate.upsert({
         where: {
           date_fromCurrency_toCurrency: {
@@ -206,8 +322,14 @@ export class CurrencyService {
             toCurrency,
           },
         },
-        create: { date, fromCurrency: REFERENCE_CURRENCY, toCurrency, rate },
-        update: { rate, fetchedAt: new Date() },
+        create: {
+          date,
+          fromCurrency: REFERENCE_CURRENCY,
+          toCurrency,
+          rate,
+          source,
+        },
+        update: { rate, fetchedAt: new Date(), source },
       });
     }
   }

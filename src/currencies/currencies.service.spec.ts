@@ -7,6 +7,12 @@ import {
   buildPrismaMock,
   type PrismaMock,
 } from '../../test/helpers/prisma-mock';
+import {
+  frankfurterOk,
+  secondaryOk,
+  failing,
+  mockFetch,
+} from '../../test/helpers/currency-fetch-mock';
 
 function buildService(
   overrides: {
@@ -25,25 +31,13 @@ function buildService(
   return { service, prisma };
 }
 
-function fetchOk(rates: Record<string, number>) {
-  return vi.fn().mockResolvedValue({
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve({ rates }),
-  });
-}
-
-function fetchFailing(status = 503) {
-  return vi.fn().mockResolvedValue({ ok: false, status });
-}
-
 describe('CurrencyService', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
   it('returns 1 when from and to are the same currency, without touching Prisma or fetch', async () => {
-    const fetchSpy = fetchOk({});
+    const fetchSpy = mockFetch({});
     vi.stubGlobal('fetch', fetchSpy);
     const { service, prisma } = buildService();
 
@@ -55,7 +49,7 @@ describe('CurrencyService', () => {
   });
 
   it('returns the rate directly when a matching row is already cached', async () => {
-    const fetchSpy = fetchOk({});
+    const fetchSpy = mockFetch({});
     vi.stubGlobal('fetch', fetchSpy);
     const { service, prisma } = buildService({
       prisma: {
@@ -75,7 +69,7 @@ describe('CurrencyService', () => {
   });
 
   it('computes a cross rate from two cached EUR rows without calling fetch', async () => {
-    const fetchSpy = fetchOk({});
+    const fetchSpy = mockFetch({});
     vi.stubGlobal('fetch', fetchSpy);
     const findUnique = vi.fn().mockImplementation(({ where }) => {
       const key = where.date_fromCurrency_toCurrency;
@@ -97,23 +91,132 @@ describe('CurrencyService', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('fetches and upserts historical rates on a cache miss, then returns the computed cross rate', async () => {
-    const fetchSpy = fetchOk({ USD: 1.1, PLN: 45.2 });
+  it('fetches and upserts historical Frankfurter rates on a cache miss, then returns the computed cross rate', async () => {
+    const fetchSpy = mockFetch({
+      frankfurter: frankfurterOk({ USD: 1.1, PLN: 45.2 }),
+    });
     vi.stubGlobal('fetch', fetchSpy);
     const { service, prisma } = buildService();
 
     const rate = await service.getRate('USD', 'PLN', new Date('2026-06-15'));
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const calledUrl = fetchSpy.mock.calls[0][0] as string;
-    expect(calledUrl).toContain('api.frankfurter.dev/v1/2026-06-15');
-    expect(calledUrl).toContain('from=EUR');
-    expect(prisma.exchangeRate.upsert).toHaveBeenCalledTimes(2); // one per key in the mocked response body
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // Frankfurter only: neither USD nor PLN needs the secondary provider
+    const frankfurterCall = fetchSpy.mock.calls.find(([url]: [string]) =>
+      url.includes('frankfurter.dev'),
+    );
+    expect(frankfurterCall?.[0]).toContain('api.frankfurter.dev/v1/2026-06-15');
+    expect(frankfurterCall?.[0]).toContain('from=EUR');
+    expect(prisma.exchangeRate.upsert).toHaveBeenCalledTimes(2); // one per key in the Frankfurter response
+    expect(prisma.exchangeRate.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          toCurrency: 'USD',
+          source: 'frankfurter.dev',
+        }),
+      }),
+    );
+    expect(prisma.exchangeRate.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          toCurrency: 'PLN',
+          source: 'frankfurter.dev',
+        }),
+      }),
+    );
     expect(rate.toNumber()).toBeCloseTo(45.2 / 1.1, 8);
   });
 
-  it('falls back to the most recent cached EUR rate when the API call fails', async () => {
-    vi.stubGlobal('fetch', fetchFailing(503));
+  it('resolves a secondary-provider currency (UAH) via the jsdelivr endpoint on a cache miss', async () => {
+    const fetchSpy = mockFetch({
+      jsdelivr: secondaryOk({ UAH: 41.5, RUB: 98.6 }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const { service, prisma } = buildService();
+
+    const rate = await service.getRate('EUR', 'UAH', new Date('2026-06-15'));
+
+    expect(rate.toNumber()).toBe(41.5);
+    const jsdelivrCall = fetchSpy.mock.calls.find(([url]: [string]) =>
+      url.includes('jsdelivr.net'),
+    );
+    expect(jsdelivrCall?.[0]).toContain(
+      '@fawazahmed0/currency-api@2026-06-15/v1/currencies/eur.json',
+    );
+    expect(prisma.exchangeRate.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          toCurrency: 'UAH',
+          source: 'fawazahmed0/currency-api',
+        }),
+      }),
+    );
+    expect(prisma.exchangeRate.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          toCurrency: 'RUB',
+          source: 'fawazahmed0/currency-api',
+        }),
+      }),
+    );
+  });
+
+  it('falls back to the Cloudflare host when the jsdelivr host fails', async () => {
+    const fetchSpy = mockFetch({
+      jsdelivr: failing(500),
+      cloudflare: secondaryOk({ UAH: 41.5, RUB: 98.6 }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const { service } = buildService();
+
+    const rate = await service.getRate('EUR', 'UAH', new Date('2026-06-15'));
+
+    expect(rate.toNumber()).toBe(41.5);
+    const calledUrls = fetchSpy.mock.calls.map(([url]: [string]) => url);
+    expect(calledUrls.some((url: string) => url.includes('jsdelivr.net'))).toBe(
+      true,
+    );
+    expect(
+      calledUrls.some((url: string) => url.includes('currency-api.pages.dev')),
+    ).toBe(true);
+  });
+
+  it('makes exactly one fetch call for a pure-Frankfurter pair, never touching the secondary provider', async () => {
+    const fetchSpy = mockFetch({
+      frankfurter: frankfurterOk({ USD: 1.1 }),
+      // jsdelivr/cloudflare are intentionally left unmocked (default to
+      // failing()) and, per mockFetch, calling either throws — so this test
+      // would fail loudly if the secondary provider were ever contacted for
+      // a Frankfurter-only pair.
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const { service } = buildService();
+
+    const rate = await service.getRate('EUR', 'USD', new Date('2026-06-15'));
+
+    expect(rate.toNumber()).toBe(1.1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('frankfurter.dev'),
+      expect.anything(),
+    );
+  });
+
+  it('still resolves a secondary-provider currency when Frankfurter fails entirely', async () => {
+    const fetchSpy = mockFetch({
+      jsdelivr: secondaryOk({ UAH: 41.5 }),
+      // frankfurter defaults to failing()
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const { service } = buildService();
+
+    const rate = await service.getRate('EUR', 'UAH', new Date('2026-06-15'));
+
+    expect(rate.toNumber()).toBe(41.5);
+  });
+
+  it('falls back to the most recent cached EUR rate when both providers fail', async () => {
+    const fetchSpy = mockFetch({});
+    vi.stubGlobal('fetch', fetchSpy);
     const { service } = buildService({
       prisma: {
         exchangeRate: {
@@ -124,17 +227,24 @@ describe('CurrencyService', () => {
       },
     });
 
-    const rate = await service.getRate('EUR', 'GBP', new Date('2026-06-20'));
+    // UAH needs the secondary provider, so with Fix 1's conditional fetch
+    // this still genuinely exercises both providers failing (not just
+    // Frankfurter, which is all a Frankfurter-only pair would attempt now).
+    const rate = await service.getRate('EUR', 'UAH', new Date('2026-06-20'));
 
     expect(rate.toNumber()).toBe(0.85);
   });
 
-  it('throws CURRENCY_API_UNAVAILABLE (503) when nothing is cached and the API is down', async () => {
-    vi.stubGlobal('fetch', fetchFailing(503));
+  it('throws CURRENCY_API_UNAVAILABLE (503) when nothing is cached and both providers are down', async () => {
+    const fetchSpy = mockFetch({});
+    vi.stubGlobal('fetch', fetchSpy);
     const { service } = buildService();
 
     try {
-      await service.getRate('EUR', 'JPY', new Date('2026-09-01'));
+      // UAH needs the secondary provider, so this genuinely exercises both
+      // providers being down (a Frankfurter-only pair would never attempt
+      // the secondary provider under Fix 1's conditional fetch).
+      await service.getRate('EUR', 'UAH', new Date('2026-09-01'));
       throw new Error('expected rejection');
     } catch (error) {
       expect((error as AppException).getStatus()).toBe(
@@ -147,7 +257,7 @@ describe('CurrencyService', () => {
   });
 
   it('throws CURRENCY_NOT_SUPPORTED (400) for an unsupported currency code, without calling fetch or Prisma', async () => {
-    const fetchSpy = fetchOk({});
+    const fetchSpy = mockFetch({});
     vi.stubGlobal('fetch', fetchSpy);
     const { service, prisma } = buildService();
 
@@ -188,31 +298,112 @@ describe('CurrencyService', () => {
     expect(result.toNumber()).toBeCloseTo(120, 8);
   });
 
-  it('supportedCurrencies returns the whitelist', () => {
+  it('supportedCurrencies returns the whitelist including UAH and RUB', () => {
     const { service } = buildService();
 
     expect(service.supportedCurrencies()).toContain('PLN');
     expect(service.supportedCurrencies()).toContain('EUR');
-    expect(service.supportedCurrencies().length).toBe(11);
+    expect(service.supportedCurrencies()).toContain('UAH');
+    expect(service.supportedCurrencies()).toContain('RUB');
+    expect(service.supportedCurrencies().length).toBe(13);
   });
 
-  it('refreshDailyRates fetches latest rates and upserts them without throwing on failure', async () => {
-    vi.stubGlobal('fetch', fetchFailing(500));
+  it('refreshDailyRates fetches latest rates from both providers and upserts them without throwing on failure', async () => {
+    const fetchSpy = mockFetch({});
+    vi.stubGlobal('fetch', fetchSpy);
     const { service } = buildService();
 
     await expect(service.refreshDailyRates()).resolves.toBeUndefined();
   });
 
-  it("refreshDailyRates upserts today's rates on success", async () => {
-    const fetchSpy = fetchOk({ USD: 1.08 });
+  it("refreshDailyRates upserts today's rates from both providers on success", async () => {
+    const fetchSpy = mockFetch({
+      frankfurter: frankfurterOk({ USD: 1.08 }),
+      jsdelivr: secondaryOk({ UAH: 41.5, RUB: 98.6 }),
+    });
     vi.stubGlobal('fetch', fetchSpy);
     const { service, prisma } = buildService();
 
     await service.refreshDailyRates();
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const calledUrl = fetchSpy.mock.calls[0][0] as string;
-    expect(calledUrl).toContain('api.frankfurter.dev/v1/latest');
-    expect(prisma.exchangeRate.upsert).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const frankfurterCall = fetchSpy.mock.calls.find(([url]: [string]) =>
+      url.includes('frankfurter.dev'),
+    );
+    expect(frankfurterCall?.[0]).toContain('api.frankfurter.dev/v1/latest');
+    const jsdelivrCall = fetchSpy.mock.calls.find(([url]: [string]) =>
+      url.includes('jsdelivr.net'),
+    );
+    expect(jsdelivrCall?.[0]).toContain('@fawazahmed0/currency-api@latest');
+    expect(prisma.exchangeRate.upsert).toHaveBeenCalledTimes(3); // USD + UAH + RUB
+    expect(prisma.exchangeRate.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          toCurrency: 'USD',
+          source: 'frankfurter.dev',
+        }),
+      }),
+    );
+    expect(prisma.exchangeRate.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          toCurrency: 'UAH',
+          source: 'fawazahmed0/currency-api',
+        }),
+      }),
+    );
+    expect(prisma.exchangeRate.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          toCurrency: 'RUB',
+          source: 'fawazahmed0/currency-api',
+        }),
+      }),
+    );
+  });
+
+  it('rejects a malformed secondary-provider response shape from jsdelivr and falls back to Cloudflare', async () => {
+    const fetchSpy = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('frankfurter.dev')) {
+        return Promise.resolve(failing());
+      }
+      if (url.includes('jsdelivr.net')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ notEur: {} }),
+        });
+      }
+      if (url.includes('currency-api.pages.dev')) {
+        return Promise.resolve(secondaryOk({ UAH: 41.5 }));
+      }
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const { service } = buildService();
+
+    const rate = await service.getRate('EUR', 'UAH', new Date('2026-06-15'));
+
+    expect(rate.toNumber()).toBe(41.5);
+    const calledUrls = fetchSpy.mock.calls.map(([url]: [string]) => url);
+    expect(calledUrls.some((url: string) => url.includes('jsdelivr.net'))).toBe(
+      true,
+    );
+    expect(
+      calledUrls.some((url: string) => url.includes('currency-api.pages.dev')),
+    ).toBe(true);
+  });
+
+  it('computes a cross rate spanning both providers (UAH to PLN) from one merged fetch', async () => {
+    const fetchSpy = mockFetch({
+      frankfurter: frankfurterOk({ PLN: 4.3 }),
+      jsdelivr: secondaryOk({ UAH: 41.5 }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    const { service } = buildService();
+
+    const rate = await service.getRate('UAH', 'PLN', new Date('2026-06-15'));
+
+    expect(rate.toNumber()).toBeCloseTo(4.3 / 41.5, 8);
   });
 });

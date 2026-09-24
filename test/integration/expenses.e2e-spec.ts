@@ -12,6 +12,7 @@ import { AppExceptionFilter } from '../../src/common/filters/app-exception.filte
 import { CurrencyService } from '../../src/currencies/currencies.service';
 import { MailService } from '../../src/mail/mail.service';
 import { createCookieAgent } from '../helpers/cookie-agent';
+import { frankfurterOk, mockFetch } from '../helpers/currency-fetch-mock';
 
 describe('Expenses flow (integration)', () => {
   let container: StartedPostgreSqlContainer;
@@ -79,11 +80,7 @@ describe('Expenses flow (integration)', () => {
   it('runs the full expense lifecycle: create, FX conversion, list filters, update with recompute, update without recompute, delete, 404', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ rates: { USD: 1.1, PLN: 4.3 } }),
-      }),
+      mockFetch({ frankfurter: frankfurterOk({ USD: 1.1, PLN: 4.3 }) }),
     );
 
     const agent = createCookieAgent(app);
