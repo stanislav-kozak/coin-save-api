@@ -9,12 +9,14 @@ import {
 } from '@testcontainers/postgresql';
 import { AppModule } from '../../src/app.module';
 import { AppExceptionFilter } from '../../src/common/filters/app-exception.filter';
+import { CurrencyService } from '../../src/currencies/currencies.service';
 import { MailService } from '../../src/mail/mail.service';
 import { createCookieAgent } from '../helpers/cookie-agent';
 
 describe('Expenses flow (integration)', () => {
   let container: StartedPostgreSqlContainer;
   let app: INestApplication;
+  let currencyService: CurrencyService;
   const capturedEmails: { to: string; vars: Record<string, string> }[] = [];
 
   beforeAll(async () => {
@@ -61,6 +63,8 @@ describe('Expenses flow (integration)', () => {
     );
     app.useGlobalFilters(new AppExceptionFilter());
     await app.init();
+
+    currencyService = moduleRef.get(CurrencyService);
   }, 60_000);
 
   afterAll(async () => {
@@ -153,12 +157,19 @@ describe('Expenses flow (integration)', () => {
       .expect(200);
     expect(getRes.body.note).toBe('Groceries');
 
+    const getRateSpy = vi.spyOn(currencyService, 'getRate');
     const noteUpdateRes = await agent
       .patch(`/api/spaces/${spaceId}/expenses/${expenseId}`)
       .send({ note: 'Weekly groceries' })
       .expect(200);
+    expect(getRateSpy).not.toHaveBeenCalled();
+    getRateSpy.mockRestore();
     expect(noteUpdateRes.body.note).toBe('Weekly groceries');
     expect(Number(noteUpdateRes.body.fxRate)).toBeCloseTo(1 / 1.1, 6);
+    expect(Number(noteUpdateRes.body.amountInPrimary)).toBeCloseTo(
+      100 / 1.1,
+      2,
+    );
 
     const amountUpdateRes = await agent
       .patch(`/api/spaces/${spaceId}/expenses/${expenseId}`)
