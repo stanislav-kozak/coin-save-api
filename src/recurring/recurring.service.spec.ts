@@ -137,6 +137,53 @@ describe('RecurringService', () => {
     }
   });
 
+  it('throws WALLET_ARCHIVED when the wallet is archived', async () => {
+    const { service } = buildService({
+      prisma: {
+        wallet: {
+          findUnique: vi.fn().mockResolvedValue({
+            id: 'w1',
+            spaceId: 's1',
+            currency: 'USD',
+            archived: true,
+          }),
+        },
+      },
+    });
+
+    try {
+      await service.createRecurringTransaction('s1', 'u1', baseInput);
+      throw new Error('expected rejection');
+    } catch (error) {
+      expect((error as AppException).getStatus()).toBe(HttpStatus.CONFLICT);
+      expect((error as AppException).getResponse()).toMatchObject({
+        code: 'WALLET_ARCHIVED',
+      });
+    }
+  });
+
+  it('throws CATEGORY_ARCHIVED when the category is archived', async () => {
+    const { service } = buildService({
+      prisma: {
+        category: {
+          findUnique: vi
+            .fn()
+            .mockResolvedValue({ id: 'c1', spaceId: 's1', archived: true }),
+        },
+      },
+    });
+
+    try {
+      await service.createRecurringTransaction('s1', 'u1', baseInput);
+      throw new Error('expected rejection');
+    } catch (error) {
+      expect((error as AppException).getStatus()).toBe(HttpStatus.CONFLICT);
+      expect((error as AppException).getResponse()).toMatchObject({
+        code: 'CATEGORY_ARCHIVED',
+      });
+    }
+  });
+
   it('throws INVALID_RECURRING_DATE_RANGE when endDate is before startDate', async () => {
     const { service, prisma } = buildService();
 

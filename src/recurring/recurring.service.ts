@@ -78,6 +78,13 @@ export class RecurringService {
         'Wallet not found',
       );
     }
+    if (wallet.archived) {
+      throw new AppException(
+        ERROR_CODES.WALLET_ARCHIVED,
+        HttpStatus.CONFLICT,
+        'Cannot use an archived wallet',
+      );
+    }
     return wallet;
   }
 
@@ -93,6 +100,13 @@ export class RecurringService {
         ERROR_CODES.CATEGORY_NOT_FOUND,
         HttpStatus.NOT_FOUND,
         'Category not found',
+      );
+    }
+    if (category.archived) {
+      throw new AppException(
+        ERROR_CODES.CATEGORY_ARCHIVED,
+        HttpStatus.CONFLICT,
+        'Cannot use an archived category',
       );
     }
   }

@@ -170,6 +170,64 @@ describe('ExpensesService', () => {
       }
     });
 
+    it('throws WALLET_ARCHIVED when the wallet is archived', async () => {
+      const { service } = buildService({
+        prisma: {
+          wallet: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: 'w1',
+              spaceId: 's1',
+              currency: 'USD',
+              archived: true,
+            }),
+          },
+        },
+      });
+
+      try {
+        await service.createExpense('s1', 'u1', {
+          walletId: 'w1',
+          type: TransactionType.EXPENSE,
+          amount: 10,
+          occurredAt: '2026-06-10T00:00:00.000Z',
+        });
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(HttpStatus.CONFLICT);
+        expect((error as AppException).getResponse()).toMatchObject({
+          code: 'WALLET_ARCHIVED',
+        });
+      }
+    });
+
+    it('throws CATEGORY_ARCHIVED when the provided category is archived', async () => {
+      const { service } = buildService({
+        prisma: {
+          category: {
+            findUnique: vi
+              .fn()
+              .mockResolvedValue({ id: 'c1', spaceId: 's1', archived: true }),
+          },
+        },
+      });
+
+      try {
+        await service.createExpense('s1', 'u1', {
+          walletId: 'w1',
+          categoryId: 'c1',
+          type: TransactionType.EXPENSE,
+          amount: 10,
+          occurredAt: '2026-06-10T00:00:00.000Z',
+        });
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(HttpStatus.CONFLICT);
+        expect((error as AppException).getResponse()).toMatchObject({
+          code: 'CATEGORY_ARCHIVED',
+        });
+      }
+    });
+
     it('throws INVALID_OCCURRED_AT when occurredAt is in the future', async () => {
       const { service } = buildService();
 
@@ -492,6 +550,55 @@ describe('ExpensesService', () => {
         expect((error as AppException).getStatus()).toBe(HttpStatus.NOT_FOUND);
         expect((error as AppException).getResponse()).toMatchObject({
           code: 'EXPENSE_NOT_FOUND',
+        });
+      }
+    });
+
+    it('throws WALLET_ARCHIVED when updating to a new walletId that is archived', async () => {
+      const { service, prisma } = buildService({
+        prisma: {
+          wallet: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: 'w2',
+              spaceId: 's1',
+              currency: 'PLN',
+              archived: true,
+            }),
+          },
+        },
+      });
+      prisma.expense.findUnique.mockResolvedValue(baseExpense);
+
+      try {
+        await service.updateExpense('s1', 'e1', { walletId: 'w2' });
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(HttpStatus.CONFLICT);
+        expect((error as AppException).getResponse()).toMatchObject({
+          code: 'WALLET_ARCHIVED',
+        });
+      }
+    });
+
+    it('throws CATEGORY_ARCHIVED when updating to a new categoryId that is archived', async () => {
+      const { service, prisma } = buildService({
+        prisma: {
+          category: {
+            findUnique: vi
+              .fn()
+              .mockResolvedValue({ id: 'c2', spaceId: 's1', archived: true }),
+          },
+        },
+      });
+      prisma.expense.findUnique.mockResolvedValue(baseExpense);
+
+      try {
+        await service.updateExpense('s1', 'e1', { categoryId: 'c2' });
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(HttpStatus.CONFLICT);
+        expect((error as AppException).getResponse()).toMatchObject({
+          code: 'CATEGORY_ARCHIVED',
         });
       }
     });
