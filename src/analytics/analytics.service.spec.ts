@@ -371,4 +371,183 @@ describe('AnalyticsService', () => {
       }
     });
   });
+
+  describe('exportExpensesCsv', () => {
+    it('produces a header row followed by one data row per expense', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi.fn().mockResolvedValue([
+              expenseRow({
+                id: 'e1',
+                occurredAt: new Date('2026-06-05T00:00:00.000Z'),
+                amount: new Prisma.Decimal(42.5),
+                walletCurrency: 'USD',
+                amountInPrimary: new Prisma.Decimal(39.1),
+                note: 'Weekly shop',
+              }),
+            ]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      const lines = csv.split('\r\n');
+      expect(lines[0]).toBe(
+        'Date,Wallet,Category,Amount,Currency,AmountInPrimary,PrimaryCurrency,Note,CreatedBy',
+      );
+      expect(lines[1]).toBe(
+        '2026-06-05,Cash,Groceries,42.5,USD,39.1,EUR,Weekly shop,Olena',
+      );
+      expect(lines).toHaveLength(2);
+    });
+
+    it('uses Uncategorized for expenses with no category', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue([
+                expenseRow({ id: 'e1', category: null, categoryId: null }),
+              ]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      expect(csv.split('\r\n')[1]).toContain(',Uncategorized,');
+    });
+
+    it('falls back to email when the creator has no name', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi.fn().mockResolvedValue([
+              expenseRow({
+                id: 'e1',
+                createdBy: { name: null, email: 'anon@example.com' },
+              }),
+            ]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      expect(csv.split('\r\n')[1]).toContain('anon@example.com');
+    });
+
+    it('quotes a note containing a comma', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue([
+                expenseRow({ id: 'e1', note: 'Milk, eggs, bread' }),
+              ]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      expect(csv.split('\r\n')[1]).toContain('"Milk, eggs, bread"');
+    });
+
+    it('quotes and escapes a note containing a double quote', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue([
+                expenseRow({ id: 'e1', note: 'She said "hi"' }),
+              ]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      expect(csv.split('\r\n')[1]).toContain('"She said ""hi"""');
+    });
+
+    it('quotes a note containing a newline', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue([
+                expenseRow({ id: 'e1', note: 'Line one\nLine two' }),
+              ]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      expect(csv).toContain('"Line one\nLine two"');
+    });
+
+    it('uses an empty field for a missing note', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue([expenseRow({ id: 'e1', note: null })]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      expect(csv.split('\r\n')[1]).toContain(',,Olena');
+    });
+
+    it('throws INVALID_PERIOD when from is after to', async () => {
+      const { service } = buildService();
+
+      try {
+        await service.exportExpensesCsv('s1', {
+          from: '2026-06-10',
+          to: '2026-06-01',
+        });
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(
+          HttpStatus.BAD_REQUEST,
+        );
+        expect((error as AppException).getResponse()).toMatchObject({
+          code: 'INVALID_PERIOD',
+        });
+      }
+    });
+  });
 });

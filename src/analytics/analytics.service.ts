@@ -110,6 +110,57 @@ export class AnalyticsService {
     };
   }
 
+  async exportExpensesCsv(
+    spaceId: string,
+    filter: { from: string; to: string },
+  ): Promise<string> {
+    const { fromStart, toEnd } = this.parsePeriod(filter.from, filter.to);
+    const space = await this.findSpaceOrThrow(spaceId);
+
+    const expenses = await this.prisma.expense.findMany({
+      where: { spaceId, occurredAt: { gte: fromStart, lte: toEnd } },
+      include: expenseWithJoinsInclude,
+      orderBy: { occurredAt: 'asc' },
+    });
+
+    const header = [
+      'Date',
+      'Wallet',
+      'Category',
+      'Amount',
+      'Currency',
+      'AmountInPrimary',
+      'PrimaryCurrency',
+      'Note',
+      'CreatedBy',
+    ];
+    const rows = expenses.map((expense) => {
+      const item = this.toExpenseItem(expense);
+      return [
+        item.occurredAt.toISOString().slice(0, 10),
+        item.walletName,
+        item.categoryName,
+        item.amount.toString(),
+        item.walletCurrency,
+        item.amountInPrimary.toString(),
+        space.primaryCurrency,
+        item.note ?? '',
+        item.createdByName,
+      ];
+    });
+
+    return [header, ...rows]
+      .map((row) => row.map((field) => this.escapeCsvField(field)).join(','))
+      .join('\r\n');
+  }
+
+  private escapeCsvField(value: string): string {
+    if (/[",\n\r]/.test(value)) {
+      return `"${value.replace(/"/g, '""')}"`;
+    }
+    return value;
+  }
+
   protected parsePeriod(
     from: string,
     to: string,
