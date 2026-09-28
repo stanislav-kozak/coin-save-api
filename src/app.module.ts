@@ -15,6 +15,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { RecurringModule } from './recurring/recurring.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { RecurringModule } from './recurring/recurring.module';
     CurrenciesModule,
     ExpensesModule,
     RecurringModule,
+    AnalyticsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
