@@ -1,11 +1,5 @@
-import {
-  Controller,
-  Get,
-  Header,
-  Param,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { AnalyticsService } from './analytics.service';
 import { GetAnalyticsQueryDto } from './dto/get-analytics-query.dto';
 import { ExportExpensesCsvQueryDto } from './dto/export-expenses-csv-query.dto';
@@ -26,12 +20,14 @@ export class AnalyticsController {
   }
 
   @Get('expenses.csv')
-  @Header('Content-Type', 'text/csv')
-  @Header('Content-Disposition', 'attachment; filename="expenses.csv"')
-  exportExpensesCsv(
+  async exportExpensesCsv(
     @Param('spaceId') spaceId: string,
     @Query() query: ExportExpensesCsvQueryDto,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<string> {
-    return this.analyticsService.exportExpensesCsv(spaceId, query);
+    const csv = await this.analyticsService.exportExpensesCsv(spaceId, query);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="expenses.csv"');
+    return csv;
   }
 }

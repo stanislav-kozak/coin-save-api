@@ -83,7 +83,10 @@ export class AnalyticsService {
 
     const [categories, currentExpenses, previousPeriodSums] = await Promise.all(
       [
-        this.prisma.category.findMany({ where: { spaceId } }),
+        this.prisma.category.findMany({
+          where: { spaceId },
+          orderBy: { sortOrder: 'asc' },
+        }),
         this.prisma.expense.findMany({
           where: {
             spaceId,
@@ -125,6 +128,7 @@ export class AnalyticsService {
 
     const header = [
       'Date',
+      'Type',
       'Wallet',
       'Category',
       'Amount',
@@ -138,6 +142,7 @@ export class AnalyticsService {
       const item = this.toExpenseItem(expense);
       return [
         item.occurredAt.toISOString().slice(0, 10),
+        item.type,
         item.walletName,
         item.categoryName,
         item.amount.toString(),
@@ -149,23 +154,34 @@ export class AnalyticsService {
       ];
     });
 
-    return [header, ...rows]
-      .map((row) => row.map((field) => this.escapeCsvField(field)).join(','))
-      .join('\r\n');
+    return (
+      '﻿' +
+      [header, ...rows]
+        .map((row) => row.map((field) => this.escapeCsvField(field)).join(','))
+        .join('\r\n')
+    );
   }
 
   private escapeCsvField(value: string): string {
-    if (/[",\n\r]/.test(value)) {
-      return `"${value.replace(/"/g, '""')}"`;
+    const neutralized = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+    if (/[",\n\r]/.test(neutralized)) {
+      return `"${neutralized.replace(/"/g, '""')}"`;
     }
-    return value;
+    return neutralized;
+  }
+
+  protected startOfUtcDay(isoString: string): Date {
+    const date = new Date(isoString);
+    return new Date(
+      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+    );
   }
 
   protected parsePeriod(
     from: string,
     to: string,
   ): { fromStart: Date; toEnd: Date } {
-    const fromStart = new Date(from);
+    const fromStart = this.startOfUtcDay(from);
     const toEnd = this.endOfUtcDay(to);
     if (Number.isNaN(fromStart.getTime()) || Number.isNaN(toEnd.getTime())) {
       throw new AppException(
@@ -190,8 +206,13 @@ export class AnalyticsService {
     fromStart: Date,
     toEnd: Date,
   ): Promise<{ expense: Prisma.Decimal; income: Prisma.Decimal }> {
-    const durationMs = toEnd.getTime() - fromStart.getTime();
-    const previousFrom = new Date(fromStart.getTime() - durationMs);
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    const periodDays = Math.round(
+      (toEnd.getTime() - fromStart.getTime() + 1) / MS_PER_DAY,
+    );
+    const previousFrom = new Date(
+      fromStart.getTime() - periodDays * MS_PER_DAY,
+    );
     const previousToExclusive = fromStart;
 
     const grouped = await this.prisma.expense.groupBy({

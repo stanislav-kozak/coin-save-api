@@ -177,8 +177,10 @@ describe('Analytics flow (integration)', () => {
         createdById: userId,
       },
     });
-    // Outside the period (previous period, 2026-05-28..2026-05-31, since the
-    // tested period 2026-06-01..2026-06-04 spans ~4 days).
+    // Outside the period (previous period, 2026-05-28..2026-05-31: the
+    // tested period 2026-06-01..2026-06-04 is 4 whole days, so the previous
+    // period is the 4 whole days immediately before, i.e.
+    // [2026-05-28T00:00:00.000Z, 2026-06-01T00:00:00.000Z)).
     await prisma.expense.create({
       data: {
         spaceId,
@@ -277,13 +279,15 @@ describe('Analytics flow (integration)', () => {
     expect(csvRes.headers['content-disposition']).toBe(
       'attachment; filename="expenses.csv"',
     );
-    const csvLines = csvRes.text.split('\r\n');
+    expect(csvRes.text.charCodeAt(0)).toBe(0xfeff); // UTF-8 BOM
+    const csvLines = csvRes.text.replace(/^\ufeff/, '').split('\r\n');
     expect(csvLines[0]).toBe(
-      'Date,Wallet,Category,Amount,Currency,AmountInPrimary,PrimaryCurrency,Note,CreatedBy',
+      'Date,Type,Wallet,Category,Amount,Currency,AmountInPrimary,PrimaryCurrency,Note,CreatedBy',
     );
     expect(csvLines).toHaveLength(5); // header + 4 in-period rows
     const rentRow = csvLines.find((line) => line.includes('Rent share'));
     expect(rentRow).toContain('"Rent share, groceries"');
+    expect(rentRow).toContain(',EXPENSE,');
     expect(csvLines.some((line) => line.includes('999'))).toBe(false);
   });
 });

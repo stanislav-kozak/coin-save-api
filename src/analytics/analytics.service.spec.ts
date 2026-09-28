@@ -113,16 +113,47 @@ describe('AnalyticsService', () => {
           where: expect.objectContaining({
             spaceId: 's1',
             occurredAt: {
-              gte: new Date(
-                new Date('2026-06-01').getTime() -
-                  (new Date('2026-06-10T23:59:59.999Z').getTime() -
-                    new Date('2026-06-01').getTime()),
-              ),
-              lt: new Date('2026-06-01'),
+              gte: new Date('2026-05-22T00:00:00.000Z'),
+              lt: new Date('2026-06-01T00:00:00.000Z'),
             },
           }),
         }),
       );
+    });
+
+    it('includes a midnight-exact transaction on the first day of the previous period (no fencepost drop)', async () => {
+      const { service, prisma } = buildService({
+        prisma: {
+          expense: {
+            groupBy: vi.fn().mockResolvedValue([
+              {
+                type: TransactionType.EXPENSE,
+                _sum: { amountInPrimary: new Prisma.Decimal(40) },
+              },
+            ]),
+          },
+        },
+      });
+
+      const result = await service.getAnalytics('s1', {
+        from: '2026-06-01',
+        to: '2026-06-10',
+      });
+
+      // The groupBy `gte` bound must be exactly UTC midnight on 2026-05-22 so
+      // that a transaction stored at exactly 2026-05-22T00:00:00.000Z (a
+      // common value, since date-only input normalizes to midnight) is
+      // included rather than excluded by a 1ms-early lower bound.
+      expect(prisma.expense.groupBy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            occurredAt: expect.objectContaining({
+              gte: new Date('2026-05-22T00:00:00.000Z'),
+            }),
+          }),
+        }),
+      );
+      expect(result.previousPeriodExpense.toNumber()).toBe(40);
     });
 
     it('returns previousPeriodExpense/Income from the groupBy sums', async () => {
@@ -150,6 +181,55 @@ describe('AnalyticsService', () => {
 
       expect(result.previousPeriodExpense.toNumber()).toBe(80);
       expect(result.previousPeriodIncome.toNumber()).toBe(300);
+    });
+
+    it('requests categories ordered by sortOrder for deterministic byCategory output', async () => {
+      const { service, prisma } = buildService();
+
+      await service.getAnalytics('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      expect(prisma.category.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: { sortOrder: 'asc' } }),
+      );
+    });
+
+    it('preserves the query-returned category order in byCategory (Uncategorized still last)', async () => {
+      const { service } = buildService({
+        prisma: {
+          category: {
+            findMany: vi.fn().mockResolvedValue([
+              {
+                id: 'c2',
+                name: 'Fun',
+                icon: null,
+                color: null,
+                monthlyLimit: null,
+              },
+              {
+                id: 'c1',
+                name: 'Groceries',
+                icon: '🛒',
+                color: '#fff',
+                monthlyLimit: new Prisma.Decimal(200),
+              },
+            ]),
+          },
+        },
+      });
+
+      const result = await service.getAnalytics('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      expect(result.byCategory.map((c) => c.categoryId)).toEqual([
+        'c2',
+        'c1',
+        null,
+      ]);
     });
 
     it('includes all space categories plus an Uncategorized bucket, with correct spent/pct', async () => {
@@ -398,12 +478,106 @@ describe('AnalyticsService', () => {
 
       const lines = csv.split('\r\n');
       expect(lines[0]).toBe(
-        'Date,Wallet,Category,Amount,Currency,AmountInPrimary,PrimaryCurrency,Note,CreatedBy',
+        '﻿Date,Type,Wallet,Category,Amount,Currency,AmountInPrimary,PrimaryCurrency,Note,CreatedBy',
       );
       expect(lines[1]).toBe(
-        '2026-06-05,Cash,Groceries,42.5,USD,39.1,EUR,Weekly shop,Olena',
+        '2026-06-05,EXPENSE,Cash,Groceries,42.5,USD,39.1,EUR,Weekly shop,Olena',
       );
       expect(lines).toHaveLength(2);
+    });
+
+    it('prefixes the CSV with a UTF-8 BOM so Excel renders Cyrillic content correctly', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi.fn().mockResolvedValue([expenseRow({ id: 'e1' })]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      expect(csv.charCodeAt(0)).toBe(0xfeff);
+    });
+
+    it('includes a Type column distinguishing EXPENSE from INCOME rows', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi.fn().mockResolvedValue([
+              expenseRow({
+                id: 'e1',
+                type: TransactionType.EXPENSE,
+                amountInPrimary: new Prisma.Decimal(500),
+                amount: new Prisma.Decimal(500),
+              }),
+              expenseRow({
+                id: 'e2',
+                type: TransactionType.INCOME,
+                amountInPrimary: new Prisma.Decimal(500),
+                amount: new Prisma.Decimal(500),
+              }),
+            ]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      const lines = csv.replace(/^\ufeff/, '').split('\r\n');
+      expect(lines[1]).toContain(',EXPENSE,');
+      expect(lines[2]).toContain(',INCOME,');
+      expect(lines[1]).not.toBe(lines[2]);
+    });
+
+    it('neutralizes formula injection in a Note starting with "="', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue([
+                expenseRow({ id: 'e1', note: '=HYPERLINK("http://evil")' }),
+              ]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      expect(csv).toContain('"\'=HYPERLINK(""http://evil"")"');
+    });
+
+    it('neutralizes formula injection in a Wallet name starting with "+"', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi.fn().mockResolvedValue([
+              expenseRow({
+                id: 'e1',
+                wallet: { name: '+1+1' },
+              }),
+            ]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+
+      const lines = csv.replace(/^\ufeff/, '').split('\r\n');
+      expect(lines[1]).toContain(",'+1+1,");
     });
 
     it('uses Uncategorized for expenses with no category', async () => {

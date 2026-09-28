@@ -5,6 +5,8 @@ import { AnalyticsController } from './analytics.controller';
 import { AnalyticsService } from './analytics.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
+import { AppException } from '../common/exceptions/app.exception';
+import { ERROR_CODES } from '../common/constants/error-codes';
 
 describe('AnalyticsController', () => {
   let app: INestApplication;
@@ -74,5 +76,23 @@ describe('AnalyticsController', () => {
       'attachment; filename="expenses.csv"',
     );
     expect(res.text).toBe('Date,Wallet\n2026-06-01,Cash');
+  });
+
+  it('GET /spaces/:spaceId/expenses.csv does not leak CSV headers onto an error response', async () => {
+    analyticsService.exportExpensesCsv.mockRejectedValueOnce(
+      new AppException(
+        ERROR_CODES.INVALID_PERIOD,
+        400,
+        'from must not be after to',
+      ),
+    );
+
+    const res = await request(app.getHttpServer())
+      .get('/spaces/s1/expenses.csv?from=2026-06-10&to=2026-06-01')
+      .expect(400);
+
+    expect(res.headers['content-type']).not.toContain('text/csv');
+    expect(res.headers['content-disposition']).toBeUndefined();
+    expect(res.body).toMatchObject({ code: 'INVALID_PERIOD' });
   });
 });
