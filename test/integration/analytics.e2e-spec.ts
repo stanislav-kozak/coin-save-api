@@ -113,8 +113,10 @@ describe('Analytics flow (integration)', () => {
       .send({ monthlyLimit: 100 })
       .expect(200);
 
-    // In period (2026-06-01..2026-06-03): two categorized expenses (day 1
-    // and day 3), one uncategorized expense (day 1), one income (day 2).
+    // In period (2026-06-01..2026-06-04, queried below): two categorized
+    // expenses (day 1 and day 3), one uncategorized expense (day 1), one
+    // income (day 2). Day 4 (2026-06-04) is deliberately left with no
+    // transactions to verify zero-activity-day bucketing in byDay.
     await prisma.expense.create({
       data: {
         spaceId,
@@ -175,8 +177,8 @@ describe('Analytics flow (integration)', () => {
         createdById: userId,
       },
     });
-    // Outside the period (previous period, 2026-05-29..2026-05-31, since the
-    // tested period 2026-06-01..2026-06-03 spans ~3 days).
+    // Outside the period (previous period, 2026-05-28..2026-05-31, since the
+    // tested period 2026-06-01..2026-06-04 spans ~4 days).
     await prisma.expense.create({
       data: {
         spaceId,
@@ -210,7 +212,7 @@ describe('Analytics flow (integration)', () => {
     });
 
     const analyticsRes = await agent
-      .get(`/api/spaces/${spaceId}/analytics?from=2026-06-01&to=2026-06-03`)
+      .get(`/api/spaces/${spaceId}/analytics?from=2026-06-01&to=2026-06-04`)
       .expect(200);
 
     expect(analyticsRes.body.currency).toBe('EUR');
@@ -239,13 +241,34 @@ describe('Analytics flow (integration)', () => {
       expense: string;
       income: string;
     }[];
-    expect(byDay).toHaveLength(3);
+    // 4 buckets: the period is 2026-06-01..2026-06-04, and 2026-06-04 has no
+    // transactions at all — this proves buildByDay walks the full UTC date
+    // range and zero-fills gaps, rather than only emitting buckets for dates
+    // that happen to appear in the data (which would coincidentally also
+    // produce the right count/values for days 1-3, but would silently drop
+    // the empty day 4 bucket).
+    expect(byDay).toHaveLength(4);
     expect(byDay[0]).toMatchObject({ date: '2026-06-01' });
     expect(Number(byDay[0].expense)).toBe(75); // 60+15
+    expect(Number(byDay[0].income)).toBe(0);
+    expect(byDay[1]).toMatchObject({ date: '2026-06-02' });
+    expect(Number(byDay[1].expense)).toBe(0);
     expect(Number(byDay[1].income)).toBe(500);
+    expect(byDay[2]).toMatchObject({ date: '2026-06-03' });
     expect(Number(byDay[2].expense)).toBe(30);
+    expect(byDay[3]).toMatchObject({ date: '2026-06-04' });
+    expect(Number(byDay[3].expense)).toBe(0);
+    expect(Number(byDay[3].income)).toBe(0);
 
-    expect(analyticsRes.body.expenses).toHaveLength(4); // 3 expenses + 1 income, in-period only
+    const expenseItems = analyticsRes.body.expenses as {
+      type: string;
+      amount: string;
+    }[];
+    expect(expenseItems).toHaveLength(4); // 3 expenses + 1 income, in-period only
+    expect(
+      expenseItems.map((item) => Number(item.amount)).sort((a, b) => a - b),
+    ).toEqual([15, 30, 60, 500]); // confirms the previous-period (25) and
+    // well-outside (999) rows are excluded, not just that the count matches
 
     const csvRes = await agent
       .get(`/api/spaces/${spaceId}/expenses.csv?from=2026-06-01&to=2026-06-03`)
