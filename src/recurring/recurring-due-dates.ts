@@ -34,6 +34,12 @@ function clampedDueDate(monthStart: Date, dayOfMonth: number): Date {
   );
 }
 
+function startOfDayUtc(date: Date): Date {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+}
+
 export function computeDueDates(input: ComputeDueDatesInput): Date[] {
   const { startDate, endDate, dayOfMonth, lastGeneratedAt, now } = input;
 
@@ -55,7 +61,7 @@ export function computeDueDates(input: ComputeDueDatesInput): Date[] {
 
     const dueDate = clampedDueDate(monthCursor, dayOfMonth);
 
-    if (dueDate.getTime() < startDate.getTime()) {
+    if (dueDate.getTime() < startOfDayUtc(startDate).getTime()) {
       monthCursor = addMonthsUtc(monthCursor, 1);
       continue;
     }

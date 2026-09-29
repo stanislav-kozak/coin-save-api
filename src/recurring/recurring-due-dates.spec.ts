@@ -116,4 +116,16 @@ describe('computeDueDates', () => {
 
     expect(dueDates).toEqual([]);
   });
+
+  it('includes the starting month when startDate has a non-midnight time component', () => {
+    const dueDates = computeDueDates({
+      startDate: new Date('2026-06-15T15:00:00.000Z'),
+      endDate: null,
+      dayOfMonth: 15,
+      lastGeneratedAt: null,
+      now: new Date('2026-06-20T00:00:00.000Z'),
+    });
+
+    expect(dueDates).toEqual([new Date('2026-06-15T00:00:00.000Z')]);
+  });
 });
