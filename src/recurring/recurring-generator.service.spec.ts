@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Prisma, TransactionType } from '@prisma/client';
 import { RecurringGeneratorService } from './recurring-generator.service';
 import {
@@ -32,6 +33,12 @@ function buildTxClient(
       expense: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn(),
+      },
+      wallet: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'w1', archived: false }),
+      },
+      category: {
+        findUnique: vi.fn().mockResolvedValue({ id: 'c1', archived: false }),
       },
     },
     overrides,
@@ -107,6 +114,11 @@ describe('RecurringGeneratorService', () => {
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(txClient.$executeRaw).toHaveBeenCalledTimes(1);
+
+      const lockOrder = txClient.$executeRaw.mock.invocationCallOrder[0];
+      const readOrder =
+        txClient.recurringTransaction.findUnique.mock.invocationCallOrder[0];
+      expect(lockOrder).toBeLessThan(readOrder);
     });
 
     it('creates a new Expense for each candidate due date not already materialized', async () => {
@@ -208,6 +220,48 @@ describe('RecurringGeneratorService', () => {
       expect(txClient.expense.create).not.toHaveBeenCalled();
       expect(txClient.recurringTransaction.update).not.toHaveBeenCalled();
     });
+
+    it('skips generation when the wallet is archived', async () => {
+      const { service, txClient } = buildService({
+        tx: {
+          wallet: {
+            findUnique: vi.fn().mockResolvedValue({ id: 'w1', archived: true }),
+          },
+        },
+      });
+      txClient.recurringTransaction.findUnique.mockResolvedValue({
+        ...baseRecurring,
+      });
+
+      await service.generateForRecurring(
+        'r1',
+        new Date('2026-02-10T00:00:00.000Z'),
+      );
+
+      expect(txClient.expense.create).not.toHaveBeenCalled();
+      expect(txClient.recurringTransaction.update).not.toHaveBeenCalled();
+    });
+
+    it('skips generation when the category is archived', async () => {
+      const { service, txClient } = buildService({
+        tx: {
+          category: {
+            findUnique: vi.fn().mockResolvedValue({ id: 'c1', archived: true }),
+          },
+        },
+      });
+      txClient.recurringTransaction.findUnique.mockResolvedValue({
+        ...baseRecurring,
+      });
+
+      await service.generateForRecurring(
+        'r1',
+        new Date('2026-02-10T00:00:00.000Z'),
+      );
+
+      expect(txClient.expense.create).not.toHaveBeenCalled();
+      expect(txClient.recurringTransaction.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('generateAll', () => {
@@ -228,6 +282,9 @@ describe('RecurringGeneratorService', () => {
     });
 
     it('logs and continues when one recurring transaction fails to generate', async () => {
+      const warnSpy = vi
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
       const { service, prisma } = buildService({
         findManyResult: [{ id: 'r1' }, { id: 'r2' }],
       });
@@ -238,6 +295,8 @@ describe('RecurringGeneratorService', () => {
       await expect(service.generateAll()).resolves.toBeUndefined();
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalled();
+      warnSpy.mockRestore();
     });
   });
 });

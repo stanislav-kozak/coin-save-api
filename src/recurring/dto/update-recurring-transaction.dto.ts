@@ -9,6 +9,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 
 export class UpdateRecurringTransactionDto {
@@ -17,8 +18,9 @@ export class UpdateRecurringTransactionDto {
   walletId?: string;
 
   @IsOptional()
+  @ValidateIf((_, value: unknown) => value !== null)
   @IsString()
-  categoryId?: string;
+  categoryId?: string | null;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 4 })
@@ -44,6 +46,7 @@ export class UpdateRecurringTransactionDto {
   dayOfMonth?: number;
 
   @IsOptional()
+  @ValidateIf((_, value: unknown) => value !== null)
   @IsISO8601()
-  endDate?: string;
+  endDate?: string | null;
 }

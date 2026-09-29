@@ -273,6 +273,13 @@ describe('Recurring flow (integration)', () => {
       .expect(201);
     const recurringId = createRes.body.id as string;
 
+    const generatorService = app.get(RecurringGeneratorService);
+    await generatorService.generateForRecurring(recurringId, new Date());
+    const backfilledExpenses = await prisma.expense.findMany({
+      where: { recurringId },
+    });
+    expect(backfilledExpenses).toEqual([]);
+
     await agent
       .patch(`/api/spaces/${spaceId}/recurring/${recurringId}/pause`)
       .expect(200);

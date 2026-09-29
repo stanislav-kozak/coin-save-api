@@ -23,12 +23,12 @@ export interface CreateRecurringTransactionInput {
 
 export interface UpdateRecurringTransactionInput {
   walletId?: string;
-  categoryId?: string;
+  categoryId?: string | null;
   amount?: number;
   name?: string;
   note?: string;
   dayOfMonth?: number;
-  endDate?: string;
+  endDate?: string | null;
 }
 
 @Injectable()
@@ -101,10 +101,21 @@ export class RecurringService {
     id: string,
     input: UpdateRecurringTransactionInput,
   ): Promise<RecurringTransaction> {
-    await this.findRecurringOrThrow(spaceId, id);
+    const existing = await this.findRecurringOrThrow(spaceId, id);
 
     if (input.categoryId) {
       await this.assertCategoryInSpace(spaceId, input.categoryId);
+    }
+
+    if (
+      input.endDate &&
+      new Date(input.endDate).getTime() <= existing.startDate.getTime()
+    ) {
+      throw new AppException(
+        ERROR_CODES.INVALID_RECURRING_DATE_RANGE,
+        HttpStatus.BAD_REQUEST,
+        'endDate must be after startDate',
+      );
     }
 
     let currency: string | undefined;
@@ -117,13 +128,18 @@ export class RecurringService {
       where: { id },
       data: {
         walletId: input.walletId,
-        categoryId: input.categoryId,
+        categoryId: input.categoryId === null ? null : input.categoryId,
         amount: input.amount,
         currency,
         name: input.name,
         note: input.note,
         dayOfMonth: input.dayOfMonth,
-        endDate: input.endDate ? new Date(input.endDate) : undefined,
+        endDate:
+          input.endDate === null
+            ? null
+            : input.endDate
+              ? new Date(input.endDate)
+              : undefined,
       },
     });
   }
@@ -139,7 +155,7 @@ export class RecurringService {
     spaceId: string,
     id: string,
   ): Promise<RecurringTransaction> {
-    return this.setActive(spaceId, id, true);
+    return this.setActive(spaceId, id, true, new Date());
   }
 
   async deleteRecurringTransaction(spaceId: string, id: string): Promise<void> {
@@ -151,11 +167,12 @@ export class RecurringService {
     spaceId: string,
     id: string,
     active: boolean,
+    lastGeneratedAt?: Date,
   ): Promise<RecurringTransaction> {
     await this.findRecurringOrThrow(spaceId, id);
     return this.prisma.recurringTransaction.update({
       where: { id },
-      data: { active },
+      data: lastGeneratedAt ? { active, lastGeneratedAt } : { active },
     });
   }
 

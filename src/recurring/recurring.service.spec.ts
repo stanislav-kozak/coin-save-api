@@ -333,7 +333,12 @@ describe('RecurringService', () => {
   });
 
   describe('updateRecurringTransaction', () => {
-    const existingRecurring = { id: 'r1', spaceId: 's1', walletId: 'w1' };
+    const existingRecurring = {
+      id: 'r1',
+      spaceId: 's1',
+      walletId: 'w1',
+      startDate: new Date('2026-01-01T00:00:00.000Z'),
+    };
 
     it('updates fields without touching currency when walletId is unchanged', async () => {
       const { service, prisma } = buildService({
@@ -404,6 +409,64 @@ describe('RecurringService', () => {
         expect((error as AppException).getStatus()).toBe(HttpStatus.NOT_FOUND);
       }
     });
+
+    it('throws INVALID_RECURRING_DATE_RANGE when the new endDate is before the existing startDate', async () => {
+      const { service } = buildService({
+        prisma: {
+          recurringTransaction: {
+            findUnique: vi.fn().mockResolvedValue(existingRecurring),
+            update: vi.fn().mockResolvedValue(existingRecurring),
+          },
+        },
+      });
+
+      try {
+        await service.updateRecurringTransaction('s1', 'r1', {
+          endDate: '2025-01-01T00:00:00.000Z',
+        });
+        throw new Error('expected rejection');
+      } catch (error) {
+        expect((error as AppException).getStatus()).toBe(
+          HttpStatus.BAD_REQUEST,
+        );
+      }
+    });
+
+    it('clears endDate when null is passed', async () => {
+      const { service, prisma } = buildService({
+        prisma: {
+          recurringTransaction: {
+            findUnique: vi.fn().mockResolvedValue(existingRecurring),
+            update: vi.fn().mockResolvedValue(existingRecurring),
+          },
+        },
+      });
+
+      await service.updateRecurringTransaction('s1', 'r1', { endDate: null });
+
+      const updateData =
+        prisma.recurringTransaction.update.mock.calls[0][0].data;
+      expect(updateData.endDate).toBeNull();
+    });
+
+    it('clears categoryId when null is passed', async () => {
+      const { service, prisma } = buildService({
+        prisma: {
+          recurringTransaction: {
+            findUnique: vi.fn().mockResolvedValue(existingRecurring),
+            update: vi.fn().mockResolvedValue(existingRecurring),
+          },
+        },
+      });
+
+      await service.updateRecurringTransaction('s1', 'r1', {
+        categoryId: null,
+      });
+
+      const updateData =
+        prisma.recurringTransaction.update.mock.calls[0][0].data;
+      expect(updateData.categoryId).toBeNull();
+    });
   });
 
   describe('pauseRecurringTransaction / resumeRecurringTransaction', () => {
@@ -440,7 +503,10 @@ describe('RecurringService', () => {
 
       expect(prisma.recurringTransaction.update).toHaveBeenCalledWith({
         where: { id: 'r1' },
-        data: { active: true },
+        data: {
+          active: true,
+          lastGeneratedAt: new Date('2026-08-15T12:00:00.000Z'),
+        },
       });
       expect(result.active).toBe(true);
     });
