@@ -16,6 +16,7 @@ import { CurrenciesModule } from './currencies/currencies.module';
 import { ExpensesModule } from './expenses/expenses.module';
 import { RecurringModule } from './recurring/recurring.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     ExpensesModule,
     RecurringModule,
     AnalyticsModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
