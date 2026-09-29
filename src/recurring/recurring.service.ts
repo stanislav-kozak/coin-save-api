@@ -21,6 +21,16 @@ export interface CreateRecurringTransactionInput {
   endDate?: string;
 }
 
+export interface UpdateRecurringTransactionInput {
+  walletId?: string;
+  categoryId?: string | null;
+  amount?: number;
+  name?: string;
+  note?: string;
+  dayOfMonth?: number;
+  endDate?: string | null;
+}
+
 @Injectable()
 export class RecurringService {
   constructor(private readonly prisma: PrismaService) {}
@@ -45,6 +55,10 @@ export class RecurringService {
       );
     }
 
+    const now = new Date();
+    const lastGeneratedAt =
+      startDate.getTime() <= now.getTime() ? now : undefined;
+
     return this.prisma.recurringTransaction.create({
       data: {
         spaceId,
@@ -59,9 +73,124 @@ export class RecurringService {
         dayOfMonth: input.dayOfMonth,
         startDate,
         endDate,
+        lastGeneratedAt,
         createdById,
       },
     });
+  }
+
+  listRecurringTransactions(
+    spaceId: string,
+    includeInactive: boolean,
+  ): Promise<RecurringTransaction[]> {
+    return this.prisma.recurringTransaction.findMany({
+      where: { spaceId, ...(includeInactive ? {} : { active: true }) },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  getRecurringTransaction(
+    spaceId: string,
+    id: string,
+  ): Promise<RecurringTransaction> {
+    return this.findRecurringOrThrow(spaceId, id);
+  }
+
+  async updateRecurringTransaction(
+    spaceId: string,
+    id: string,
+    input: UpdateRecurringTransactionInput,
+  ): Promise<RecurringTransaction> {
+    const existing = await this.findRecurringOrThrow(spaceId, id);
+
+    if (input.categoryId) {
+      await this.assertCategoryInSpace(spaceId, input.categoryId);
+    }
+
+    if (
+      input.endDate &&
+      new Date(input.endDate).getTime() <= existing.startDate.getTime()
+    ) {
+      throw new AppException(
+        ERROR_CODES.INVALID_RECURRING_DATE_RANGE,
+        HttpStatus.BAD_REQUEST,
+        'endDate must be after startDate',
+      );
+    }
+
+    let currency: string | undefined;
+    if (input.walletId) {
+      const wallet = await this.assertWalletInSpace(spaceId, input.walletId);
+      currency = wallet.currency;
+    }
+
+    return this.prisma.recurringTransaction.update({
+      where: { id },
+      data: {
+        walletId: input.walletId,
+        categoryId: input.categoryId === null ? null : input.categoryId,
+        amount: input.amount,
+        currency,
+        name: input.name,
+        note: input.note,
+        dayOfMonth: input.dayOfMonth,
+        endDate:
+          input.endDate === null
+            ? null
+            : input.endDate
+              ? new Date(input.endDate)
+              : undefined,
+      },
+    });
+  }
+
+  pauseRecurringTransaction(
+    spaceId: string,
+    id: string,
+  ): Promise<RecurringTransaction> {
+    return this.setActive(spaceId, id, false);
+  }
+
+  resumeRecurringTransaction(
+    spaceId: string,
+    id: string,
+  ): Promise<RecurringTransaction> {
+    return this.setActive(spaceId, id, true, new Date());
+  }
+
+  async deleteRecurringTransaction(spaceId: string, id: string): Promise<void> {
+    await this.findRecurringOrThrow(spaceId, id);
+    await this.prisma.recurringTransaction.delete({ where: { id } });
+  }
+
+  private async setActive(
+    spaceId: string,
+    id: string,
+    active: boolean,
+    lastGeneratedAt?: Date,
+  ): Promise<RecurringTransaction> {
+    await this.findRecurringOrThrow(spaceId, id);
+    return this.prisma.recurringTransaction.update({
+      where: { id },
+      data: lastGeneratedAt ? { active, lastGeneratedAt } : { active },
+    });
+  }
+
+  private async findRecurringOrThrow(
+    spaceId: string,
+    id: string,
+  ): Promise<RecurringTransaction> {
+    const recurring = await this.prisma.recurringTransaction.findUnique({
+      where: { id },
+    });
+    if (!recurring || recurring.spaceId !== spaceId) {
+      throw new AppException(
+        ERROR_CODES.RECURRING_NOT_FOUND,
+        HttpStatus.NOT_FOUND,
+        'Recurring transaction not found',
+      );
+    }
+    return recurring;
   }
 
   private async assertWalletInSpace(
