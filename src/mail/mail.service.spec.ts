@@ -55,4 +55,35 @@ describe('MailService', () => {
     );
     expect(call.html).toContain('Family');
   });
+
+  it('renders the recurring-reminder template with the reminder details', async () => {
+    const mailerService = { sendMail: vi.fn().mockResolvedValue(undefined) };
+    const service = new MailService(mailerService as never);
+
+    await service.send(
+      'user@example.com',
+      'uk',
+      'recurring-reminder',
+      'Нагадування про платіж',
+      {
+        walletIcon: '💳',
+        walletName: 'Моно',
+        categoryIcon: '🎬',
+        recurringName: 'Netflix',
+        amount: '249.00',
+        currency: 'UAH',
+        occurrenceDate: '15 червня',
+        manageUrl: 'https://app.coinsave.com/recurring',
+      },
+    );
+
+    const call = mailerService.sendMail.mock.calls[0][0] as {
+      to: string;
+      html: string;
+    };
+    expect(call.to).toBe('user@example.com');
+    expect(call.html).toContain('Netflix');
+    expect(call.html).toContain('249.00');
+    expect(call.html).toContain('https://app.coinsave.com/recurring');
+  });
 });
