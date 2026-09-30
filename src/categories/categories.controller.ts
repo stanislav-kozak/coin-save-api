@@ -18,15 +18,27 @@ import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
 import { ListCategoriesQueryDto } from './dto/list-categories-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../common/types/authenticated-user';
+import { EventBus } from '../events/event-bus.service';
 
 @Controller('spaces/:spaceId/categories')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
 export class CategoriesController {
-  constructor(private readonly categoriesService: CategoriesService) {}
+  constructor(
+    private readonly categoriesService: CategoriesService,
+    private readonly events: EventBus,
+  ) {}
 
   @Post()
-  create(@Param('spaceId') spaceId: string, @Body() dto: CreateCategoryDto) {
-    return this.categoriesService.createCategory(spaceId, dto);
+  async create(
+    @Param('spaceId') spaceId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateCategoryDto,
+  ) {
+    const category = await this.categoriesService.createCategory(spaceId, dto);
+    this.events.emitToSpace(spaceId, 'category.changed', user.id);
+    return category;
   }
 
   @Get()
@@ -46,11 +58,17 @@ export class CategoriesController {
   // were a categoryId.
   @Patch('reorder')
   @HttpCode(HttpStatus.OK)
-  reorder(
+  async reorder(
     @Param('spaceId') spaceId: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ReorderCategoriesDto,
   ) {
-    return this.categoriesService.reorderCategories(spaceId, dto.orderedIds);
+    const categories = await this.categoriesService.reorderCategories(
+      spaceId,
+      dto.orderedIds,
+    );
+    this.events.emitToSpace(spaceId, 'category.changed', user.id);
+    return categories;
   }
 
   @Get(':categoryId')
@@ -62,28 +80,47 @@ export class CategoriesController {
   }
 
   @Patch(':categoryId')
-  update(
+  async update(
     @Param('spaceId') spaceId: string,
     @Param('categoryId') categoryId: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateCategoryDto,
   ) {
-    return this.categoriesService.updateCategory(spaceId, categoryId, dto);
+    const category = await this.categoriesService.updateCategory(
+      spaceId,
+      categoryId,
+      dto,
+    );
+    this.events.emitToSpace(spaceId, 'category.changed', user.id);
+    return category;
   }
 
   @Patch(':categoryId/archive')
-  archive(
+  async archive(
     @Param('spaceId') spaceId: string,
     @Param('categoryId') categoryId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.categoriesService.archiveCategory(spaceId, categoryId);
+    const category = await this.categoriesService.archiveCategory(
+      spaceId,
+      categoryId,
+    );
+    this.events.emitToSpace(spaceId, 'category.changed', user.id);
+    return category;
   }
 
   @Patch(':categoryId/unarchive')
-  unarchive(
+  async unarchive(
     @Param('spaceId') spaceId: string,
     @Param('categoryId') categoryId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.categoriesService.unarchiveCategory(spaceId, categoryId);
+    const category = await this.categoriesService.unarchiveCategory(
+      spaceId,
+      categoryId,
+    );
+    this.events.emitToSpace(spaceId, 'category.changed', user.id);
+    return category;
   }
 
   @Delete(':categoryId')
@@ -91,7 +128,9 @@ export class CategoriesController {
   async remove(
     @Param('spaceId') spaceId: string,
     @Param('categoryId') categoryId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<void> {
     await this.categoriesService.deleteCategory(spaceId, categoryId);
+    this.events.emitToSpace(spaceId, 'category.changed', user.id);
   }
 }

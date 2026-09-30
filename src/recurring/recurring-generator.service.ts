@@ -3,6 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrencyService } from '../currencies/currencies.service';
+import { EventBus } from '../events/event-bus.service';
 import { computeDueDates } from './recurring-due-dates';
 
 // Cron fires at 01:00 Europe/Kyiv, which lands 22:00-23:00 UTC on the
@@ -19,6 +20,7 @@ export class RecurringGeneratorService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly currencyService: CurrencyService,
+    private readonly events: EventBus,
   ) {}
 
   @Cron('0 1 * * *', {
@@ -48,7 +50,7 @@ export class RecurringGeneratorService {
   }
 
   async generateForRecurring(recurringId: string, now: Date): Promise<void> {
-    await this.prisma.$transaction(
+    const result = await this.prisma.$transaction(
       async (tx) => {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${recurringId}))`;
 
@@ -56,17 +58,17 @@ export class RecurringGeneratorService {
           where: { id: recurringId },
         });
         if (!recurring || !recurring.active) {
-          return;
+          return null;
         }
         if (recurring.startDate.getTime() > now.getTime()) {
-          return;
+          return null;
         }
 
         const space = await tx.space.findUnique({
           where: { id: recurring.spaceId },
         });
         if (!space) {
-          return;
+          return null;
         }
 
         const wallet = await tx.wallet.findUnique({
@@ -76,7 +78,7 @@ export class RecurringGeneratorService {
           this.logger.warn(
             `Skipping recurring transaction ${recurring.id}: wallet is archived or missing`,
           );
-          return;
+          return null;
         }
 
         if (recurring.categoryId) {
@@ -87,7 +89,7 @@ export class RecurringGeneratorService {
             this.logger.warn(
               `Skipping recurring transaction ${recurring.id}: category is archived or missing`,
             );
-            return;
+            return null;
           }
         }
 
@@ -100,6 +102,7 @@ export class RecurringGeneratorService {
         });
 
         let maxGenerated: Date | null = null;
+        let generatedAny = false;
         for (const dueDate of candidateDates) {
           const existing = await tx.expense.findFirst({
             where: { recurringId: recurring.id, occurredAt: dueDate },
@@ -133,6 +136,7 @@ export class RecurringGeneratorService {
                 recurringId: recurring.id,
               },
             });
+            generatedAny = true;
           }
 
           maxGenerated = dueDate;
@@ -144,8 +148,14 @@ export class RecurringGeneratorService {
             data: { lastGeneratedAt: maxGenerated },
           });
         }
+
+        return generatedAny ? recurring.spaceId : null;
       },
       { timeout: 30_000 },
     );
+
+    if (result) {
+      this.events.emitToSpace(result, 'expense.changed', 'system');
+    }
   }
 }

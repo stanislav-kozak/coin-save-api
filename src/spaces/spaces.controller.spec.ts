@@ -7,6 +7,7 @@ import { SpacesService } from './spaces.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
 import { SpaceOwnerGuard } from '../common/guards/space-owner.guard';
+import { EventBus } from '../events/event-bus.service';
 
 describe('SpacesController', () => {
   let app: INestApplication;
@@ -15,11 +16,15 @@ describe('SpacesController', () => {
     listMembers: vi.fn(),
     leaveSpace: vi.fn().mockResolvedValue(undefined),
   };
+  const events = { emitToSpace: vi.fn() };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [SpacesController],
-      providers: [{ provide: SpacesService, useValue: spacesService }],
+      providers: [
+        { provide: SpacesService, useValue: spacesService },
+        { provide: EventBus, useValue: events },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({
@@ -39,6 +44,7 @@ describe('SpacesController', () => {
             .getRequest<{ membership?: unknown }>().membership = {
             id: 'm1',
             role: Role.MEMBER,
+            userId: 'u1',
           };
           return true;
         },
@@ -61,6 +67,7 @@ describe('SpacesController', () => {
       .send({ name: 'Family' })
       .expect(201);
     expect(spacesService.createSpace).toHaveBeenCalledWith('u1', 'Family');
+    expect(events.emitToSpace).not.toHaveBeenCalled();
   });
 
   it('POST /spaces/:spaceId/leave calls leaveSpace with the guard-attached membership', async () => {
@@ -68,6 +75,12 @@ describe('SpacesController', () => {
     expect(spacesService.leaveSpace).toHaveBeenCalledWith('s1', {
       id: 'm1',
       role: Role.MEMBER,
+      userId: 'u1',
     });
+    expect(events.emitToSpace).toHaveBeenCalledWith(
+      's1',
+      'space.changed',
+      'u1',
+    );
   });
 });

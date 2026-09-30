@@ -74,11 +74,13 @@ function buildService(
   const getRate =
     overrides.getRate ?? vi.fn().mockResolvedValue(new Prisma.Decimal('1'));
   const currencyService = { getRate } as never;
+  const eventBus = { emitToSpace: vi.fn() };
   const service = new RecurringGeneratorService(
     prisma as never,
     currencyService,
+    eventBus as never,
   );
-  return { service, prisma, txClient, getRate };
+  return { service, prisma, txClient, getRate, eventBus };
 }
 
 const baseRecurring = {
@@ -122,7 +124,7 @@ describe('RecurringGeneratorService', () => {
     });
 
     it('creates a new Expense for each candidate due date not already materialized', async () => {
-      const { service, txClient, getRate } = buildService();
+      const { service, txClient, getRate, eventBus } = buildService();
       txClient.recurringTransaction.findUnique.mockResolvedValue({
         ...baseRecurring,
       });
@@ -150,6 +152,11 @@ describe('RecurringGeneratorService', () => {
       expect(
         (createdData.amountInPrimary as Prisma.Decimal).toNumber(),
       ).toBeCloseTo(15.99 * 1.1, 6);
+      expect(eventBus.emitToSpace).toHaveBeenCalledWith(
+        's1',
+        'expense.changed',
+        'system',
+      );
     });
 
     it('skips creating an Expense that already exists, but still advances lastGeneratedAt past it', async () => {
@@ -171,6 +178,21 @@ describe('RecurringGeneratorService', () => {
       });
     });
 
+    it('does not emit expense.changed when nothing new was generated', async () => {
+      const { service, txClient, eventBus } = buildService();
+      txClient.recurringTransaction.findUnique.mockResolvedValue({
+        ...baseRecurring,
+      });
+      txClient.expense.findFirst.mockResolvedValue({ id: 'existing' });
+
+      await service.generateForRecurring(
+        'r1',
+        new Date('2026-02-10T00:00:00.000Z'),
+      );
+
+      expect(eventBus.emitToSpace).not.toHaveBeenCalled();
+    });
+
     it('updates lastGeneratedAt to the maximum generated date across multiple months', async () => {
       const { service, txClient } = buildService();
       txClient.recurringTransaction.findUnique.mockResolvedValue({
@@ -190,7 +212,7 @@ describe('RecurringGeneratorService', () => {
     });
 
     it('does nothing when the recurring transaction is inactive', async () => {
-      const { service, txClient } = buildService();
+      const { service, txClient, eventBus } = buildService();
       txClient.recurringTransaction.findUnique.mockResolvedValue({
         ...baseRecurring,
         active: false,
@@ -203,10 +225,11 @@ describe('RecurringGeneratorService', () => {
 
       expect(txClient.expense.create).not.toHaveBeenCalled();
       expect(txClient.recurringTransaction.update).not.toHaveBeenCalled();
+      expect(eventBus.emitToSpace).not.toHaveBeenCalled();
     });
 
     it('does nothing when there are no candidate due dates', async () => {
-      const { service, txClient } = buildService();
+      const { service, txClient, eventBus } = buildService();
       txClient.recurringTransaction.findUnique.mockResolvedValue({
         ...baseRecurring,
         lastGeneratedAt: new Date('2026-02-01T00:00:00.000Z'),
@@ -219,10 +242,11 @@ describe('RecurringGeneratorService', () => {
 
       expect(txClient.expense.create).not.toHaveBeenCalled();
       expect(txClient.recurringTransaction.update).not.toHaveBeenCalled();
+      expect(eventBus.emitToSpace).not.toHaveBeenCalled();
     });
 
     it('skips generation when the wallet is archived', async () => {
-      const { service, txClient } = buildService({
+      const { service, txClient, eventBus } = buildService({
         tx: {
           wallet: {
             findUnique: vi.fn().mockResolvedValue({ id: 'w1', archived: true }),
@@ -240,10 +264,11 @@ describe('RecurringGeneratorService', () => {
 
       expect(txClient.expense.create).not.toHaveBeenCalled();
       expect(txClient.recurringTransaction.update).not.toHaveBeenCalled();
+      expect(eventBus.emitToSpace).not.toHaveBeenCalled();
     });
 
     it('skips generation when the category is archived', async () => {
-      const { service, txClient } = buildService({
+      const { service, txClient, eventBus } = buildService({
         tx: {
           category: {
             findUnique: vi.fn().mockResolvedValue({ id: 'c1', archived: true }),
@@ -261,6 +286,7 @@ describe('RecurringGeneratorService', () => {
 
       expect(txClient.expense.create).not.toHaveBeenCalled();
       expect(txClient.recurringTransaction.update).not.toHaveBeenCalled();
+      expect(eventBus.emitToSpace).not.toHaveBeenCalled();
     });
   });
 

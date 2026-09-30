@@ -6,6 +6,7 @@ import { ExpensesController } from './expenses.controller';
 import { ExpensesService } from './expenses.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
+import { EventBus } from '../events/event-bus.service';
 
 describe('ExpensesController', () => {
   let app: INestApplication;
@@ -16,11 +17,15 @@ describe('ExpensesController', () => {
     updateExpense: vi.fn(),
     deleteExpense: vi.fn(),
   };
+  const events = { emitToSpace: vi.fn() };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [ExpensesController],
-      providers: [{ provide: ExpensesService, useValue: expensesService }],
+      providers: [
+        { provide: ExpensesService, useValue: expensesService },
+        { provide: EventBus, useValue: events },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({
@@ -70,6 +75,11 @@ describe('ExpensesController', () => {
       amount: 100,
       occurredAt: '2026-06-10T00:00:00.000Z',
     });
+    expect(events.emitToSpace).toHaveBeenCalledWith(
+      's1',
+      'expense.changed',
+      'u1',
+    );
   });
 
   it('GET /spaces/:spaceId/expenses forwards query filters', async () => {
@@ -106,6 +116,11 @@ describe('ExpensesController', () => {
     expect(expensesService.updateExpense).toHaveBeenCalledWith('s1', 'e1', {
       note: 'Updated',
     });
+    expect(events.emitToSpace).toHaveBeenCalledWith(
+      's1',
+      'expense.changed',
+      'u1',
+    );
   });
 
   it('DELETE /spaces/:spaceId/expenses/:expenseId returns 204', async () => {
@@ -116,6 +131,11 @@ describe('ExpensesController', () => {
       .expect(204);
 
     expect(expensesService.deleteExpense).toHaveBeenCalledWith('s1', 'e1');
+    expect(events.emitToSpace).toHaveBeenCalledWith(
+      's1',
+      'expense.changed',
+      'u1',
+    );
   });
 
   it('rejects a negative amount with 400', async () => {

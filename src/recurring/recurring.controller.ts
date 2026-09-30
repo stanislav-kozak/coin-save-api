@@ -19,23 +19,29 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
+import { EventBus } from '../events/event-bus.service';
 
 @Controller('spaces/:spaceId/recurring')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
 export class RecurringController {
-  constructor(private readonly recurringService: RecurringService) {}
+  constructor(
+    private readonly recurringService: RecurringService,
+    private readonly events: EventBus,
+  ) {}
 
   @Post()
-  create(
+  async create(
     @Param('spaceId') spaceId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateRecurringTransactionDto,
   ) {
-    return this.recurringService.createRecurringTransaction(
+    const recurring = await this.recurringService.createRecurringTransaction(
       spaceId,
       user.id,
       dto,
     );
+    this.events.emitToSpace(spaceId, 'recurring.changed', user.id);
+    return recurring;
   }
 
   @Get()
@@ -58,38 +64,47 @@ export class RecurringController {
   }
 
   @Patch(':recurringId')
-  update(
+  async update(
     @Param('spaceId') spaceId: string,
     @Param('recurringId') recurringId: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateRecurringTransactionDto,
   ) {
-    return this.recurringService.updateRecurringTransaction(
+    const recurring = await this.recurringService.updateRecurringTransaction(
       spaceId,
       recurringId,
       dto,
     );
+    this.events.emitToSpace(spaceId, 'recurring.changed', user.id);
+    return recurring;
   }
 
   @Patch(':recurringId/pause')
-  pause(
+  async pause(
     @Param('spaceId') spaceId: string,
     @Param('recurringId') recurringId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.recurringService.pauseRecurringTransaction(
+    const recurring = await this.recurringService.pauseRecurringTransaction(
       spaceId,
       recurringId,
     );
+    this.events.emitToSpace(spaceId, 'recurring.changed', user.id);
+    return recurring;
   }
 
   @Patch(':recurringId/resume')
-  resume(
+  async resume(
     @Param('spaceId') spaceId: string,
     @Param('recurringId') recurringId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.recurringService.resumeRecurringTransaction(
+    const recurring = await this.recurringService.resumeRecurringTransaction(
       spaceId,
       recurringId,
     );
+    this.events.emitToSpace(spaceId, 'recurring.changed', user.id);
+    return recurring;
   }
 
   @Delete(':recurringId')
@@ -97,10 +112,12 @@ export class RecurringController {
   async remove(
     @Param('spaceId') spaceId: string,
     @Param('recurringId') recurringId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<void> {
     await this.recurringService.deleteRecurringTransaction(
       spaceId,
       recurringId,
     );
+    this.events.emitToSpace(spaceId, 'recurring.changed', user.id);
   }
 }
