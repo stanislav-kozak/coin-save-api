@@ -5,6 +5,7 @@ import { CategoriesController } from './categories.controller';
 import { CategoriesService } from './categories.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
+import { EventBus } from '../events/event-bus.service';
 
 describe('CategoriesController', () => {
   let app: INestApplication;
@@ -13,14 +14,26 @@ describe('CategoriesController', () => {
     listCategories: vi.fn().mockResolvedValue([]),
     reorderCategories: vi.fn().mockResolvedValue([]),
   };
+  const events = { emitToSpace: vi.fn() };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [CategoriesController],
-      providers: [{ provide: CategoriesService, useValue: categoriesService }],
+      providers: [
+        { provide: CategoriesService, useValue: categoriesService },
+        { provide: EventBus, useValue: events },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
-      .useValue({ canActivate: () => true })
+      .useValue({
+        canActivate: (context: import('@nestjs/common').ExecutionContext) => {
+          context.switchToHttp().getRequest<{ user?: unknown }>().user = {
+            id: 'u1',
+            email: 'a@b.com',
+          };
+          return true;
+        },
+      })
       .overrideGuard(SpaceMemberGuard)
       .useValue({ canActivate: () => true })
       .compile();
@@ -45,6 +58,11 @@ describe('CategoriesController', () => {
     expect(categoriesService.createCategory).toHaveBeenCalledWith('s1', {
       name: 'Kids',
     });
+    expect(events.emitToSpace).toHaveBeenCalledWith(
+      's1',
+      'category.changed',
+      'u1',
+    );
   });
 
   it('PATCH /spaces/:spaceId/categories/reorder routes to reorderCategories, not :categoryId', async () => {

@@ -5,6 +5,7 @@ import { WalletsController } from './wallets.controller';
 import { WalletsService } from './wallets.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
+import { EventBus } from '../events/event-bus.service';
 
 describe('WalletsController', () => {
   let app: INestApplication;
@@ -12,14 +13,26 @@ describe('WalletsController', () => {
     createWallet: vi.fn().mockResolvedValue({ id: 'w1', name: 'Cash' }),
     listWallets: vi.fn().mockResolvedValue([]),
   };
+  const events = { emitToSpace: vi.fn() };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [WalletsController],
-      providers: [{ provide: WalletsService, useValue: walletsService }],
+      providers: [
+        { provide: WalletsService, useValue: walletsService },
+        { provide: EventBus, useValue: events },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
-      .useValue({ canActivate: () => true })
+      .useValue({
+        canActivate: (context: import('@nestjs/common').ExecutionContext) => {
+          context.switchToHttp().getRequest<{ user?: unknown }>().user = {
+            id: 'u1',
+            email: 'a@b.com',
+          };
+          return true;
+        },
+      })
       .overrideGuard(SpaceMemberGuard)
       .useValue({ canActivate: () => true })
       .compile();
@@ -46,6 +59,11 @@ describe('WalletsController', () => {
       currency: 'PLN',
       initialBalance: 100,
     });
+    expect(events.emitToSpace).toHaveBeenCalledWith(
+      's1',
+      'wallet.changed',
+      'u1',
+    );
   });
 
   it('GET /spaces/:spaceId/wallets?includeArchived=true forwards the parsed boolean', async () => {
