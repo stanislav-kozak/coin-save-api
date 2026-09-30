@@ -6,6 +6,7 @@ import { RecurringController } from './recurring.controller';
 import { RecurringService } from './recurring.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
+import { EventBus } from '../events/event-bus.service';
 
 describe('RecurringController', () => {
   let app: INestApplication;
@@ -18,11 +19,15 @@ describe('RecurringController', () => {
     resumeRecurringTransaction: vi.fn(),
     deleteRecurringTransaction: vi.fn(),
   };
+  const events = { emitToSpace: vi.fn() };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       controllers: [RecurringController],
-      providers: [{ provide: RecurringService, useValue: recurringService }],
+      providers: [
+        { provide: RecurringService, useValue: recurringService },
+        { provide: EventBus, useValue: events },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({
@@ -74,6 +79,11 @@ describe('RecurringController', () => {
       'u1',
       expect.objectContaining({ name: 'Netflix' }),
     );
+    expect(events.emitToSpace).toHaveBeenCalledWith(
+      's1',
+      'recurring.changed',
+      'u1',
+    );
   });
 
   it('GET /spaces/:spaceId/recurring forwards includeInactive', async () => {
@@ -115,6 +125,11 @@ describe('RecurringController', () => {
       'r1',
       { amount: 20 },
     );
+    expect(events.emitToSpace).toHaveBeenCalledWith(
+      's1',
+      'recurring.changed',
+      'u1',
+    );
   });
 
   it('PATCH /spaces/:spaceId/recurring/:id/pause pauses', async () => {
@@ -130,6 +145,11 @@ describe('RecurringController', () => {
     expect(recurringService.pauseRecurringTransaction).toHaveBeenCalledWith(
       's1',
       'r1',
+    );
+    expect(events.emitToSpace).toHaveBeenCalledWith(
+      's1',
+      'recurring.changed',
+      'u1',
     );
   });
 
@@ -159,6 +179,11 @@ describe('RecurringController', () => {
     expect(recurringService.deleteRecurringTransaction).toHaveBeenCalledWith(
       's1',
       'r1',
+    );
+    expect(events.emitToSpace).toHaveBeenCalledWith(
+      's1',
+      'recurring.changed',
+      'u1',
     );
   });
 });

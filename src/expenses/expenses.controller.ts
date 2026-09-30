@@ -19,19 +19,29 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
+import { EventBus } from '../events/event-bus.service';
 
 @Controller('spaces/:spaceId/expenses')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
 export class ExpensesController {
-  constructor(private readonly expensesService: ExpensesService) {}
+  constructor(
+    private readonly expensesService: ExpensesService,
+    private readonly events: EventBus,
+  ) {}
 
   @Post()
-  create(
+  async create(
     @Param('spaceId') spaceId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateExpenseDto,
   ) {
-    return this.expensesService.createExpense(spaceId, user.id, dto);
+    const expense = await this.expensesService.createExpense(
+      spaceId,
+      user.id,
+      dto,
+    );
+    this.events.emitToSpace(spaceId, 'expense.changed', user.id);
+    return expense;
   }
 
   @Get()
@@ -51,12 +61,19 @@ export class ExpensesController {
   }
 
   @Patch(':expenseId')
-  update(
+  async update(
     @Param('spaceId') spaceId: string,
     @Param('expenseId') expenseId: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateExpenseDto,
   ) {
-    return this.expensesService.updateExpense(spaceId, expenseId, dto);
+    const expense = await this.expensesService.updateExpense(
+      spaceId,
+      expenseId,
+      dto,
+    );
+    this.events.emitToSpace(spaceId, 'expense.changed', user.id);
+    return expense;
   }
 
   @Delete(':expenseId')
@@ -64,7 +81,9 @@ export class ExpensesController {
   async remove(
     @Param('spaceId') spaceId: string,
     @Param('expenseId') expenseId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<void> {
     await this.expensesService.deleteExpense(spaceId, expenseId);
+    this.events.emitToSpace(spaceId, 'expense.changed', user.id);
   }
 }

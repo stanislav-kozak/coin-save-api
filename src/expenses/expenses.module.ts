@@ -3,9 +3,10 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { CurrenciesModule } from '../currencies/currencies.module';
 import { ExpensesService } from './expenses.service';
 import { ExpensesController } from './expenses.controller';
+import { EventsModule } from '../events/events.module';
 
 @Module({
-  imports: [PrismaModule, CurrenciesModule],
+  imports: [PrismaModule, CurrenciesModule, EventsModule],
   controllers: [ExpensesController],
   providers: [ExpensesService],
 })
