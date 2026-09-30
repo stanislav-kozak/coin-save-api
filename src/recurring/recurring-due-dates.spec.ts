@@ -1,4 +1,7 @@
-import { computeDueDates } from './recurring-due-dates';
+import {
+  computeDueDates,
+  computeNextOccurrenceDate,
+} from './recurring-due-dates';
 
 describe('computeDueDates', () => {
   it('skips the starting month when the clamped day falls before startDate, generates from next month', () => {
@@ -127,5 +130,84 @@ describe('computeDueDates', () => {
     });
 
     expect(dueDates).toEqual([new Date('2026-06-15T00:00:00.000Z')]);
+  });
+});
+
+describe('computeNextOccurrenceDate', () => {
+  it('returns the same-month date when lastGeneratedAt is null and the clamped day is on/after startDate', () => {
+    const result = computeNextOccurrenceDate({
+      startDate: new Date('2026-01-10T00:00:00.000Z'),
+      endDate: null,
+      dayOfMonth: 15,
+      lastGeneratedAt: null,
+    });
+
+    expect(result).toEqual(new Date('2026-01-15T00:00:00.000Z'));
+  });
+
+  it('skips to next month when lastGeneratedAt is null and the clamped day is before startDate', () => {
+    const result = computeNextOccurrenceDate({
+      startDate: new Date('2026-01-20T00:00:00.000Z'),
+      endDate: null,
+      dayOfMonth: 15,
+      lastGeneratedAt: null,
+    });
+
+    expect(result).toEqual(new Date('2026-02-15T00:00:00.000Z'));
+  });
+
+  it('returns the month after lastGeneratedAt', () => {
+    const result = computeNextOccurrenceDate({
+      startDate: new Date('2026-01-01T00:00:00.000Z'),
+      endDate: null,
+      dayOfMonth: 5,
+      lastGeneratedAt: new Date('2026-03-05T00:00:00.000Z'),
+    });
+
+    expect(result).toEqual(new Date('2026-04-05T00:00:00.000Z'));
+  });
+
+  it('clamps dayOfMonth to the last day of a non-leap February', () => {
+    const result = computeNextOccurrenceDate({
+      startDate: new Date('2026-01-01T00:00:00.000Z'),
+      endDate: null,
+      dayOfMonth: 31,
+      lastGeneratedAt: new Date('2026-01-15T00:00:00.000Z'),
+    });
+
+    expect(result).toEqual(new Date('2026-02-28T00:00:00.000Z'));
+  });
+
+  it('clamps dayOfMonth to the last day of a leap February', () => {
+    const result = computeNextOccurrenceDate({
+      startDate: new Date('2028-01-01T00:00:00.000Z'),
+      endDate: null,
+      dayOfMonth: 31,
+      lastGeneratedAt: new Date('2028-01-15T00:00:00.000Z'),
+    });
+
+    expect(result).toEqual(new Date('2028-02-29T00:00:00.000Z'));
+  });
+
+  it('returns null when the next occurrence would fall after endDate', () => {
+    const result = computeNextOccurrenceDate({
+      startDate: new Date('2026-01-01T00:00:00.000Z'),
+      endDate: new Date('2026-03-01T00:00:00.000Z'),
+      dayOfMonth: 5,
+      lastGeneratedAt: new Date('2026-03-05T00:00:00.000Z'),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('returns the occurrence when it falls exactly on endDate', () => {
+    const result = computeNextOccurrenceDate({
+      startDate: new Date('2026-01-01T00:00:00.000Z'),
+      endDate: new Date('2026-04-05T00:00:00.000Z'),
+      dayOfMonth: 5,
+      lastGeneratedAt: new Date('2026-03-05T00:00:00.000Z'),
+    });
+
+    expect(result).toEqual(new Date('2026-04-05T00:00:00.000Z'));
   });
 });

@@ -75,3 +75,33 @@ export function computeDueDates(input: ComputeDueDatesInput): Date[] {
 
   return dueDates;
 }
+
+export interface ComputeNextOccurrenceDateInput {
+  startDate: Date;
+  endDate: Date | null;
+  dayOfMonth: number;
+  lastGeneratedAt: Date | null;
+}
+
+export function computeNextOccurrenceDate(
+  input: ComputeNextOccurrenceDateInput,
+): Date | null {
+  const { startDate, endDate, dayOfMonth, lastGeneratedAt } = input;
+
+  let monthCursor = firstOfMonthUtc(lastGeneratedAt ?? startDate);
+  if (lastGeneratedAt) {
+    monthCursor = addMonthsUtc(monthCursor, 1);
+  }
+
+  let dueDate = clampedDueDate(monthCursor, dayOfMonth);
+  if (dueDate.getTime() < startOfDayUtc(startDate).getTime()) {
+    monthCursor = addMonthsUtc(monthCursor, 1);
+    dueDate = clampedDueDate(monthCursor, dayOfMonth);
+  }
+
+  if (endDate && dueDate.getTime() > endDate.getTime()) {
+    return null;
+  }
+
+  return dueDate;
+}
