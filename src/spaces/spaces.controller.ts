@@ -22,12 +22,18 @@ import { SpaceOwnerGuard } from '../common/guards/space-owner.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CurrentMembership } from '../common/decorators/current-membership.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
+import { EventBus } from '../events/event-bus.service';
 
 @Controller('spaces')
 @UseGuards(JwtAuthGuard)
 export class SpacesController {
-  constructor(private readonly spacesService: SpacesService) {}
+  constructor(
+    private readonly spacesService: SpacesService,
+    private readonly events: EventBus,
+  ) {}
 
+  // No realtime event on creation: a brand-new space has no room with any
+  // other subscriber yet, so emitting here would always be a no-op.
   @Post()
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSpaceDto) {
     return this.spacesService.createSpace(user.id, dto.name);
@@ -46,15 +52,25 @@ export class SpacesController {
 
   @Patch(':spaceId')
   @UseGuards(SpaceOwnerGuard)
-  update(@Param('spaceId') spaceId: string, @Body() dto: UpdateSpaceDto) {
-    return this.spacesService.updateSpace(spaceId, dto);
+  async update(
+    @Param('spaceId') spaceId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateSpaceDto,
+  ) {
+    const space = await this.spacesService.updateSpace(spaceId, dto);
+    this.events.emitToSpace(spaceId, 'space.changed', user.id);
+    return space;
   }
 
   @Delete(':spaceId')
   @UseGuards(SpaceOwnerGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('spaceId') spaceId: string): Promise<void> {
+  async remove(
+    @Param('spaceId') spaceId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
     await this.spacesService.deleteSpace(spaceId);
+    this.events.emitToSpace(spaceId, 'space.changed', user.id);
   }
 
   @Get(':spaceId/members')
@@ -65,12 +81,19 @@ export class SpacesController {
 
   @Patch(':spaceId/members/:membershipId')
   @UseGuards(SpaceOwnerGuard)
-  changeMemberRole(
+  async changeMemberRole(
     @Param('spaceId') spaceId: string,
     @Param('membershipId') membershipId: string,
+    @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ChangeMemberRoleDto,
   ) {
-    return this.spacesService.changeMemberRole(spaceId, membershipId, dto.role);
+    const membership = await this.spacesService.changeMemberRole(
+      spaceId,
+      membershipId,
+      dto.role,
+    );
+    this.events.emitToSpace(spaceId, 'space.changed', user.id);
+    return membership;
   }
 
   @Delete(':spaceId/members/:membershipId')
@@ -79,8 +102,10 @@ export class SpacesController {
   async removeMember(
     @Param('spaceId') spaceId: string,
     @Param('membershipId') membershipId: string,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<void> {
     await this.spacesService.removeMember(spaceId, membershipId);
+    this.events.emitToSpace(spaceId, 'space.changed', user.id);
   }
 
   @Post(':spaceId/leave')
@@ -91,6 +116,7 @@ export class SpacesController {
     @CurrentMembership() membership: Membership,
   ) {
     await this.spacesService.leaveSpace(spaceId, membership);
+    this.events.emitToSpace(spaceId, 'space.changed', membership.userId);
     return { message: 'Left the space' };
   }
 
