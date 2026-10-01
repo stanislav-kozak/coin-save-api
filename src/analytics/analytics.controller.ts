@@ -1,10 +1,12 @@
 import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
+import { ApiOkResponse, ApiProduces } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { AnalyticsService } from './analytics.service';
 import { GetAnalyticsQueryDto } from './dto/get-analytics-query.dto';
 import { ExportExpensesCsvQueryDto } from './dto/export-expenses-csv-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
+import { AnalyticsResponseDto } from './dto/analytics-response.dto';
 
 @Controller('spaces/:spaceId')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
@@ -12,6 +14,7 @@ export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
   @Get('analytics')
+  @ApiOkResponse({ type: AnalyticsResponseDto })
   getAnalytics(
     @Param('spaceId') spaceId: string,
     @Query() query: GetAnalyticsQueryDto,
@@ -20,6 +23,11 @@ export class AnalyticsController {
   }
 
   @Get('expenses.csv')
+  @ApiProduces('text/csv')
+  @ApiOkResponse({
+    description: 'UTF-8 CSV with BOM',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
   async exportExpensesCsv(
     @Param('spaceId') spaceId: string,
     @Query() query: ExportExpensesCsvQueryDto,

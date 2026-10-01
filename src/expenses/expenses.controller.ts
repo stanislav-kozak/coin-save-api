@@ -11,6 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ApiCreatedResponse, ApiOkResponse } from '@nestjs/swagger';
 import { ExpensesService } from './expenses.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
@@ -20,6 +21,7 @@ import { SpaceMemberGuard } from '../common/guards/space-member.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { EventBus } from '../events/event-bus.service';
+import { ExpenseResponseDto } from './dto/expense-response.dto';
 
 @Controller('spaces/:spaceId/expenses')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
@@ -30,6 +32,7 @@ export class ExpensesController {
   ) {}
 
   @Post()
+  @ApiCreatedResponse({ type: ExpenseResponseDto })
   async create(
     @Param('spaceId') spaceId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -45,6 +48,7 @@ export class ExpensesController {
   }
 
   @Get()
+  @ApiOkResponse({ type: [ExpenseResponseDto] })
   list(
     @Param('spaceId') spaceId: string,
     @Query() query: ListExpensesQueryDto,
@@ -53,6 +57,7 @@ export class ExpensesController {
   }
 
   @Get(':expenseId')
+  @ApiOkResponse({ type: ExpenseResponseDto })
   get(
     @Param('spaceId') spaceId: string,
     @Param('expenseId') expenseId: string,
@@ -61,6 +66,7 @@ export class ExpensesController {
   }
 
   @Patch(':expenseId')
+  @ApiOkResponse({ type: ExpenseResponseDto })
   async update(
     @Param('spaceId') spaceId: string,
     @Param('expenseId') expenseId: string,

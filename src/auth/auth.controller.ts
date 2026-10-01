@@ -9,6 +9,12 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBody,
+  ApiCreatedResponse,
+  ApiFoundResponse,
+  ApiOkResponse,
+} from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -24,6 +30,9 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
+import { LoginDto } from './dto/login.dto';
+import { LoginResponseDto, UserResponseDto } from './dto/auth-response.dto';
+import { MessageResponseDto } from '../common/dto/message-response.dto';
 
 const ACCESS_COOKIE = 'access';
 const REFRESH_COOKIE = 'refresh';
@@ -37,6 +46,7 @@ export class AuthController {
   ) {}
 
   @Post('signup')
+  @ApiCreatedResponse({ type: MessageResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.CREATED)
   async signup(@Body() dto: SignupDto): Promise<{ message: string }> {
@@ -45,6 +55,7 @@ export class AuthController {
   }
 
   @Post('verify-email')
+  @ApiOkResponse({ type: MessageResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.OK)
   async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ message: string }> {
@@ -53,6 +64,8 @@ export class AuthController {
   }
 
   @Post('login')
+  @ApiBody({ type: LoginDto })
+  @ApiOkResponse({ type: LoginResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
   @UseGuards(LocalAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -70,6 +83,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @ApiOkResponse({ type: MessageResponseDto })
   @HttpCode(HttpStatus.OK)
   async logout(
     @Req() req: Request,
@@ -85,6 +99,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @ApiOkResponse({ type: MessageResponseDto })
   @HttpCode(HttpStatus.OK)
   async refresh(
     @Req() req: Request,
@@ -111,16 +126,21 @@ export class AuthController {
   }
 
   @Get('me')
+  @ApiOkResponse({ type: UserResponseDto })
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthenticatedUser) {
     return this.usersService.findById(user.id);
   }
 
   @Get('google')
+  @ApiFoundResponse({ description: 'Redirects to Google OAuth consent' })
   @UseGuards(GoogleAuthGuard)
   googleStart(): void {}
 
   @Get('google/callback')
+  @ApiFoundResponse({
+    description: 'Sets auth cookies and redirects to the frontend',
+  })
   @UseGuards(GoogleAuthGuard)
   async googleCallback(
     @CurrentUser() user: AuthenticatedUser,
@@ -136,6 +156,7 @@ export class AuthController {
   }
 
   @Post('request-password-reset')
+  @ApiOkResponse({ type: MessageResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.OK)
   async requestPasswordReset(
@@ -146,6 +167,7 @@ export class AuthController {
   }
 
   @Post('reset-password')
+  @ApiOkResponse({ type: MessageResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.OK)
   async resetPassword(

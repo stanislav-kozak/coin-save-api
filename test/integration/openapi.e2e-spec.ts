@@ -69,6 +69,52 @@ describe('OpenAPI contract (integration)', () => {
     expect(res.body.paths['/api/auth/signup']).toBeDefined();
   });
 
+  it('documents a response schema for every operation so the generated client is fully typed', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/docs.json')
+      .expect(200);
+
+    type Responses = Record<
+      string,
+      { content?: Record<string, { schema?: unknown }> }
+    >;
+    const paths = res.body.paths as Record<
+      string,
+      Record<string, { responses: Responses }>
+    >;
+
+    // 204 (no body) and 302 (OAuth redirects) legitimately have no schema.
+    const bodylessStatuses = new Set(['204', '302']);
+    const undocumented: string[] = [];
+    for (const [path, operations] of Object.entries(paths)) {
+      for (const [method, operation] of Object.entries(operations)) {
+        const documented = Object.entries(operation.responses).some(
+          ([status, response]) =>
+            bodylessStatuses.has(status) ||
+            Object.values(response.content ?? {}).some(
+              (media) => media.schema !== undefined,
+            ),
+        );
+        if (!documented) {
+          undocumented.push(`${method.toUpperCase()} ${path}`);
+        }
+      }
+    }
+
+    expect(undocumented).toEqual([]);
+    expect(
+      paths['/api/spaces/{spaceId}/wallets'].get.responses['200'].content?.[
+        'application/json'
+      ].schema,
+    ).toEqual({
+      type: 'array',
+      items: { $ref: '#/components/schemas/WalletResponseDto' },
+    });
+    expect(
+      res.body.components.schemas.WalletResponseDto.properties.balance,
+    ).toMatchObject({ type: 'string', format: 'decimal' });
+  });
+
   it('serves the interactive Swagger UI at /api/docs', async () => {
     const res = await request(app.getHttpServer()).get('/api/docs').expect(200);
 
