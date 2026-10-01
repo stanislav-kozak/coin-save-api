@@ -6,6 +6,7 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { GENERIC_ERROR_CODES } from '../constants/error-codes';
 
 interface ErrorBody {
   statusCode: number;
@@ -48,8 +49,8 @@ export class AppExceptionFilter implements ExceptionFilter {
         statusCode: status,
         code:
           status === Number(HttpStatus.BAD_REQUEST)
-            ? 'VALIDATION_ERROR'
-            : 'HTTP_ERROR',
+            ? GENERIC_ERROR_CODES.VALIDATION_ERROR
+            : GENERIC_ERROR_CODES.HTTP_ERROR,
         message: Array.isArray(rawMessage) ? rawMessage.join(', ') : rawMessage,
       });
       return;
@@ -57,7 +58,7 @@ export class AppExceptionFilter implements ExceptionFilter {
 
     response.status(500).json({
       statusCode: 500,
-      code: 'INTERNAL_ERROR',
+      code: GENERIC_ERROR_CODES.INTERNAL_ERROR,
       message: 'Internal server error',
     });
   }

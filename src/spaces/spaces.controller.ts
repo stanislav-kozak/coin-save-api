@@ -32,9 +32,11 @@ import {
   SpaceWithRoleResponseDto,
 } from './dto/space-response.dto';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
+import { ApiErrorResponse } from '../common/decorators/api-error-response.decorator';
 
 @Controller('spaces')
 @UseGuards(JwtAuthGuard)
+@ApiErrorResponse(HttpStatus.UNAUTHORIZED, 'HTTP_ERROR')
 export class SpacesController {
   constructor(
     private readonly spacesService: SpacesService,
@@ -44,6 +46,7 @@ export class SpacesController {
   // No realtime event on creation: a brand-new space has no room with any
   // other subscriber yet, so emitting here would always be a no-op.
   @Post()
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
   @ApiCreatedResponse({ type: SpaceResponseDto })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSpaceDto) {
     return this.spacesService.createSpace(user.id, dto.name);
@@ -56,6 +59,7 @@ export class SpacesController {
   }
 
   @Get(':spaceId')
+  @ApiErrorResponse(HttpStatus.FORBIDDEN, 'FORBIDDEN_NOT_MEMBER')
   @ApiOkResponse({ type: SpaceResponseDto })
   @UseGuards(SpaceMemberGuard)
   get(@Param('spaceId') spaceId: string) {
@@ -63,6 +67,12 @@ export class SpacesController {
   }
 
   @Patch(':spaceId')
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
+  @ApiErrorResponse(
+    HttpStatus.FORBIDDEN,
+    'FORBIDDEN_NOT_MEMBER',
+    'FORBIDDEN_NOT_OWNER',
+  )
   @ApiOkResponse({ type: SpaceResponseDto })
   @UseGuards(SpaceOwnerGuard)
   async update(
@@ -76,6 +86,11 @@ export class SpacesController {
   }
 
   @Delete(':spaceId')
+  @ApiErrorResponse(
+    HttpStatus.FORBIDDEN,
+    'FORBIDDEN_NOT_MEMBER',
+    'FORBIDDEN_NOT_OWNER',
+  )
   @UseGuards(SpaceOwnerGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
@@ -87,6 +102,7 @@ export class SpacesController {
   }
 
   @Get(':spaceId/members')
+  @ApiErrorResponse(HttpStatus.FORBIDDEN, 'FORBIDDEN_NOT_MEMBER')
   @ApiOkResponse({ type: [MemberResponseDto] })
   @UseGuards(SpaceMemberGuard)
   listMembers(@Param('spaceId') spaceId: string) {
@@ -94,6 +110,14 @@ export class SpacesController {
   }
 
   @Patch(':spaceId/members/:membershipId')
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
+  @ApiErrorResponse(
+    HttpStatus.FORBIDDEN,
+    'FORBIDDEN_NOT_MEMBER',
+    'FORBIDDEN_NOT_OWNER',
+    'CANNOT_REMOVE_LAST_OWNER',
+  )
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'MEMBER_NOT_FOUND')
   @ApiOkResponse({ type: MembershipResponseDto })
   @UseGuards(SpaceOwnerGuard)
   async changeMemberRole(
@@ -112,6 +136,13 @@ export class SpacesController {
   }
 
   @Delete(':spaceId/members/:membershipId')
+  @ApiErrorResponse(
+    HttpStatus.FORBIDDEN,
+    'FORBIDDEN_NOT_MEMBER',
+    'FORBIDDEN_NOT_OWNER',
+    'CANNOT_REMOVE_LAST_OWNER',
+  )
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'MEMBER_NOT_FOUND')
   @UseGuards(SpaceOwnerGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   async removeMember(
@@ -124,6 +155,11 @@ export class SpacesController {
   }
 
   @Post(':spaceId/leave')
+  @ApiErrorResponse(
+    HttpStatus.FORBIDDEN,
+    'FORBIDDEN_NOT_MEMBER',
+    'CANNOT_REMOVE_LAST_OWNER',
+  )
   @ApiOkResponse({ type: MessageResponseDto })
   @UseGuards(SpaceMemberGuard)
   @HttpCode(HttpStatus.OK)
@@ -137,6 +173,9 @@ export class SpacesController {
   }
 
   @Post(':spaceId/invitations')
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
+  @ApiErrorResponse(HttpStatus.FORBIDDEN, 'FORBIDDEN_NOT_MEMBER')
+  @ApiErrorResponse(HttpStatus.CONFLICT, 'ALREADY_MEMBER')
   @ApiCreatedResponse({ type: MessageResponseDto })
   @UseGuards(SpaceMemberGuard)
   @HttpCode(HttpStatus.CREATED)
@@ -150,6 +189,7 @@ export class SpacesController {
   }
 
   @Get(':spaceId/invitations')
+  @ApiErrorResponse(HttpStatus.FORBIDDEN, 'FORBIDDEN_NOT_MEMBER')
   @ApiOkResponse({ type: [InvitationResponseDto] })
   @UseGuards(SpaceMemberGuard)
   listInvitations(@Param('spaceId') spaceId: string) {
@@ -157,6 +197,12 @@ export class SpacesController {
   }
 
   @Delete(':spaceId/invitations/:invitationId')
+  @ApiErrorResponse(
+    HttpStatus.FORBIDDEN,
+    'FORBIDDEN_NOT_MEMBER',
+    'FORBIDDEN_NOT_OWNER',
+  )
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'INVITATION_NOT_FOUND')
   @UseGuards(SpaceOwnerGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   async revokeInvitation(

@@ -31,3 +31,16 @@ export const ERROR_CODES = {
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
+
+// Codes produced by AppExceptionFilter for exceptions that are not
+// AppExceptions (class-validator, passport, throttler, unexpected errors).
+export const GENERIC_ERROR_CODES = {
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+  HTTP_ERROR: 'HTTP_ERROR',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const;
+
+export type GenericErrorCode =
+  (typeof GENERIC_ERROR_CODES)[keyof typeof GENERIC_ERROR_CODES];
+
+export type ApiErrorCode = ErrorCode | GenericErrorCode;
