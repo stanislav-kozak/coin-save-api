@@ -1,6 +1,22 @@
 import { Injectable } from '@nestjs/common';
-import type { User } from '@prisma/client';
+import type { Prisma, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+// Fields safe to return to the client. Never add passwordHash here.
+export const publicUserSelect = {
+  id: true,
+  email: true,
+  emailVerified: true,
+  name: true,
+  avatarUrl: true,
+  locale: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.UserSelect;
+
+export type PublicUser = Prisma.UserGetPayload<{
+  select: typeof publicUserSelect;
+}>;
 
 @Injectable()
 export class UsersService {
@@ -12,6 +28,13 @@ export class UsersService {
 
   findById(id: string): Promise<User | null> {
     return this.prisma.user.findUnique({ where: { id } });
+  }
+
+  findPublicById(id: string): Promise<PublicUser | null> {
+    return this.prisma.user.findUnique({
+      where: { id },
+      select: publicUserSelect,
+    });
   }
 
   createLocal(email: string, passwordHash: string): Promise<User> {

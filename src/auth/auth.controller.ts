@@ -129,7 +129,7 @@ export class AuthController {
   @ApiOkResponse({ type: UserResponseDto })
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthenticatedUser) {
-    return this.usersService.findById(user.id);
+    return this.usersService.findPublicById(user.id);
   }
 
   @Get('google')

@@ -95,6 +95,23 @@ describe('Auth flow (integration)', () => {
     expect(cookies.some((c) => c.startsWith('access='))).toBe(true);
     expect(cookies.some((c) => c.startsWith('refresh='))).toBe(true);
 
+    const meRes = await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Cookie', cookies)
+      .expect(200);
+    expect(meRes.body).not.toHaveProperty('passwordHash');
+    expect(Object.keys(meRes.body).sort()).toEqual([
+      'avatarUrl',
+      'createdAt',
+      'email',
+      'emailVerified',
+      'id',
+      'locale',
+      'name',
+      'updatedAt',
+    ]);
+    expect(meRes.body.email).toBe(email);
+
     const refreshRes = await request(app.getHttpServer())
       .post('/api/auth/refresh')
       .set('Cookie', cookies)
