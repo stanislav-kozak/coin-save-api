@@ -37,10 +37,4 @@ COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
 EXPOSE 3000
 ENTRYPOINT ["./docker-entrypoint.sh"]
-# NOTE: the compiled entry point is dist/src/main.js, not dist/main.js —
-# tsconfig has no explicit rootDir, so tsc's inferred rootDir is the project
-# root (it also compiles root-level files like prisma.config.ts), which nests
-# everything under src/ beneath dist/src/. This differs from the existing
-# start:prod script ("node dist/main"), which is itself consequently broken;
-# fixing that build-output layout is out of scope for this Docker task.
-CMD ["node", "dist/src/main"]
+CMD ["node", "dist/main"]
