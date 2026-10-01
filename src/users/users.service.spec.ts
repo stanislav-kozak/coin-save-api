@@ -1,4 +1,4 @@
-import { UsersService } from './users.service';
+import { publicUserSelect, UsersService } from './users.service';
 
 describe('UsersService', () => {
   it('creates a local user with the given email and password hash', async () => {
@@ -12,6 +12,21 @@ describe('UsersService', () => {
     expect(prisma.user.create).toHaveBeenCalledWith({
       data: { email: 'a@b.com', passwordHash: 'hash' },
     });
+  });
+
+  it('finds a public user profile by id without selecting the password hash', async () => {
+    const found = { id: 'u1', email: 'a@b.com' };
+    const prisma = { user: { findUnique: vi.fn().mockResolvedValue(found) } };
+    const service = new UsersService(prisma as never);
+
+    const result = await service.findPublicById('u1');
+
+    expect(result).toBe(found);
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      select: publicUserSelect,
+    });
+    expect(publicUserSelect).not.toHaveProperty('passwordHash');
   });
 
   it('finds a user by email', async () => {

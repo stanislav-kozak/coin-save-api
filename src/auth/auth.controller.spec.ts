@@ -20,7 +20,7 @@ describe('AuthController', () => {
       refreshToken: 'refresh-token',
     }),
   };
-  const usersService = { findById: vi.fn() };
+  const usersService = { findPublicById: vi.fn() };
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
