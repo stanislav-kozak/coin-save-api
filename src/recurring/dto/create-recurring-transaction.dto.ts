@@ -11,6 +11,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { ApiPositiveAmountProperty } from '../../common/decorators/api-property.decorator';
 import { RecurringFrequency, TransactionType } from '@prisma/client';
 
 export class CreateRecurringTransactionDto {
@@ -25,6 +26,7 @@ export class CreateRecurringTransactionDto {
   type!: TransactionType;
 
   @IsNumber({ maxDecimalPlaces: 4 })
+  @ApiPositiveAmountProperty()
   @IsPositive()
   @Max(1_000_000_000)
   amount!: number;

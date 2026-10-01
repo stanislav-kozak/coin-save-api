@@ -115,6 +115,33 @@ describe('OpenAPI contract (integration)', () => {
     ).toMatchObject({ type: 'string', format: 'decimal' });
   });
 
+  it('documents money inputs as strictly positive, not minimum 1', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/docs.json')
+      .expect(200);
+    const schemas = res.body.components.schemas as Record<
+      string,
+      { properties: Record<string, unknown> }
+    >;
+
+    const moneyInputs: [string, string][] = [
+      ['CreateExpenseDto', 'amount'],
+      ['UpdateExpenseDto', 'amount'],
+      ['CreateRecurringTransactionDto', 'amount'],
+      ['UpdateRecurringTransactionDto', 'amount'],
+      ['CreateCategoryDto', 'monthlyLimit'],
+      ['UpdateCategoryDto', 'monthlyLimit'],
+    ];
+    for (const [schema, property] of moneyInputs) {
+      expect(schemas[schema].properties[property]).toMatchObject({
+        type: 'number',
+        minimum: 0,
+        exclusiveMinimum: true,
+        maximum: 1_000_000_000,
+      });
+    }
+  });
+
   it('serves the interactive Swagger UI at /api/docs', async () => {
     const res = await request(app.getHttpServer()).get('/api/docs').expect(200);
 
