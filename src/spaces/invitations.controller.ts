@@ -14,9 +14,11 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { EventBus } from '../events/event-bus.service';
 import { MembershipResponseDto } from './dto/space-response.dto';
+import { ApiErrorResponse } from '../common/decorators/api-error-response.decorator';
 
 @Controller('invitations')
 @UseGuards(JwtAuthGuard)
+@ApiErrorResponse(HttpStatus.UNAUTHORIZED, 'HTTP_ERROR')
 export class InvitationsController {
   constructor(
     private readonly spacesService: SpacesService,
@@ -24,6 +26,13 @@ export class InvitationsController {
   ) {}
 
   @Post('accept')
+  @ApiErrorResponse(
+    HttpStatus.BAD_REQUEST,
+    'VALIDATION_ERROR',
+    'INVALID_INVITATION_TOKEN',
+  )
+  @ApiErrorResponse(HttpStatus.FORBIDDEN, 'INVITATION_EMAIL_MISMATCH')
+  @ApiErrorResponse(HttpStatus.CONFLICT, 'ALREADY_MEMBER')
   @ApiOkResponse({ type: MembershipResponseDto })
   @HttpCode(HttpStatus.OK)
   async accept(

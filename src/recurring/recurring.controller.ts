@@ -22,9 +22,12 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { EventBus } from '../events/event-bus.service';
 import { RecurringTransactionResponseDto } from './dto/recurring-transaction-response.dto';
+import { ApiErrorResponse } from '../common/decorators/api-error-response.decorator';
 
 @Controller('spaces/:spaceId/recurring')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
+@ApiErrorResponse(HttpStatus.UNAUTHORIZED, 'HTTP_ERROR')
+@ApiErrorResponse(HttpStatus.FORBIDDEN, 'FORBIDDEN_NOT_MEMBER')
 export class RecurringController {
   constructor(
     private readonly recurringService: RecurringService,
@@ -32,6 +35,17 @@ export class RecurringController {
   ) {}
 
   @Post()
+  @ApiErrorResponse(
+    HttpStatus.BAD_REQUEST,
+    'VALIDATION_ERROR',
+    'INVALID_RECURRING_DATE_RANGE',
+  )
+  @ApiErrorResponse(
+    HttpStatus.NOT_FOUND,
+    'WALLET_NOT_FOUND',
+    'CATEGORY_NOT_FOUND',
+  )
+  @ApiErrorResponse(HttpStatus.CONFLICT, 'WALLET_ARCHIVED', 'CATEGORY_ARCHIVED')
   @ApiCreatedResponse({ type: RecurringTransactionResponseDto })
   async create(
     @Param('spaceId') spaceId: string,
@@ -48,6 +62,7 @@ export class RecurringController {
   }
 
   @Get()
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
   @ApiOkResponse({ type: [RecurringTransactionResponseDto] })
   list(
     @Param('spaceId') spaceId: string,
@@ -60,6 +75,7 @@ export class RecurringController {
   }
 
   @Get(':recurringId')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'RECURRING_NOT_FOUND')
   @ApiOkResponse({ type: RecurringTransactionResponseDto })
   get(
     @Param('spaceId') spaceId: string,
@@ -69,6 +85,18 @@ export class RecurringController {
   }
 
   @Patch(':recurringId')
+  @ApiErrorResponse(
+    HttpStatus.BAD_REQUEST,
+    'VALIDATION_ERROR',
+    'INVALID_RECURRING_DATE_RANGE',
+  )
+  @ApiErrorResponse(
+    HttpStatus.NOT_FOUND,
+    'RECURRING_NOT_FOUND',
+    'WALLET_NOT_FOUND',
+    'CATEGORY_NOT_FOUND',
+  )
+  @ApiErrorResponse(HttpStatus.CONFLICT, 'WALLET_ARCHIVED', 'CATEGORY_ARCHIVED')
   @ApiOkResponse({ type: RecurringTransactionResponseDto })
   async update(
     @Param('spaceId') spaceId: string,
@@ -86,6 +114,7 @@ export class RecurringController {
   }
 
   @Patch(':recurringId/pause')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'RECURRING_NOT_FOUND')
   @ApiOkResponse({ type: RecurringTransactionResponseDto })
   async pause(
     @Param('spaceId') spaceId: string,
@@ -101,6 +130,7 @@ export class RecurringController {
   }
 
   @Patch(':recurringId/resume')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'RECURRING_NOT_FOUND')
   @ApiOkResponse({ type: RecurringTransactionResponseDto })
   async resume(
     @Param('spaceId') spaceId: string,
@@ -116,6 +146,7 @@ export class RecurringController {
   }
 
   @Delete(':recurringId')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'RECURRING_NOT_FOUND')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
     @Param('spaceId') spaceId: string,

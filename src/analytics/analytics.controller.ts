@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query, Res, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpStatus,
+  Param,
+  Query,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOkResponse, ApiProduces } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { AnalyticsService } from './analytics.service';
@@ -7,13 +15,21 @@ import { ExportExpensesCsvQueryDto } from './dto/export-expenses-csv-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
 import { AnalyticsResponseDto } from './dto/analytics-response.dto';
+import { ApiErrorResponse } from '../common/decorators/api-error-response.decorator';
 
 @Controller('spaces/:spaceId')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
+@ApiErrorResponse(HttpStatus.UNAUTHORIZED, 'HTTP_ERROR')
+@ApiErrorResponse(HttpStatus.FORBIDDEN, 'FORBIDDEN_NOT_MEMBER')
 export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
   @Get('analytics')
+  @ApiErrorResponse(
+    HttpStatus.BAD_REQUEST,
+    'VALIDATION_ERROR',
+    'INVALID_PERIOD',
+  )
   @ApiOkResponse({ type: AnalyticsResponseDto })
   getAnalytics(
     @Param('spaceId') spaceId: string,
@@ -23,6 +39,11 @@ export class AnalyticsController {
   }
 
   @Get('expenses.csv')
+  @ApiErrorResponse(
+    HttpStatus.BAD_REQUEST,
+    'VALIDATION_ERROR',
+    'INVALID_PERIOD',
+  )
   @ApiProduces('text/csv')
   @ApiOkResponse({
     description: 'UTF-8 CSV with BOM',
