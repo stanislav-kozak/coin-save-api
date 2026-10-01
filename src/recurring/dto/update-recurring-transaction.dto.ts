@@ -11,6 +11,7 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
+import { ApiPositiveAmountProperty } from '../../common/decorators/api-property.decorator';
 
 export class UpdateRecurringTransactionDto {
   @IsOptional()
@@ -24,6 +25,7 @@ export class UpdateRecurringTransactionDto {
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 4 })
+  @ApiPositiveAmountProperty({ required: false })
   @IsPositive()
   @Max(1_000_000_000)
   amount?: number;

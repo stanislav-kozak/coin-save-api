@@ -8,6 +8,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import { ApiPositiveAmountProperty } from '../../common/decorators/api-property.decorator';
 
 export class UpdateExpenseDto {
   @ValidateIf((o: UpdateExpenseDto) => o.walletId !== undefined)
@@ -21,6 +22,7 @@ export class UpdateExpenseDto {
 
   @ValidateIf((o: UpdateExpenseDto) => o.amount !== undefined)
   @IsNumber({ maxDecimalPlaces: 4 })
+  @ApiPositiveAmountProperty({ required: false })
   @IsPositive()
   @Max(1_000_000_000)
   amount?: number;

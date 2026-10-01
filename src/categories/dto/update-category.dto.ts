@@ -8,6 +8,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { ApiPositiveAmountProperty } from '../../common/decorators/api-property.decorator';
 
 export class UpdateCategoryDto {
   @IsOptional()
@@ -29,6 +30,7 @@ export class UpdateCategoryDto {
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 4 })
+  @ApiPositiveAmountProperty({ required: false })
   @IsPositive()
   @Max(1_000_000_000)
   monthlyLimit?: number;
