@@ -11,6 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ApiCreatedResponse, ApiOkResponse } from '@nestjs/swagger';
 import { RecurringService } from './recurring.service';
 import { CreateRecurringTransactionDto } from './dto/create-recurring-transaction.dto';
 import { UpdateRecurringTransactionDto } from './dto/update-recurring-transaction.dto';
@@ -20,6 +21,7 @@ import { SpaceMemberGuard } from '../common/guards/space-member.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { EventBus } from '../events/event-bus.service';
+import { RecurringTransactionResponseDto } from './dto/recurring-transaction-response.dto';
 
 @Controller('spaces/:spaceId/recurring')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
@@ -30,6 +32,7 @@ export class RecurringController {
   ) {}
 
   @Post()
+  @ApiCreatedResponse({ type: RecurringTransactionResponseDto })
   async create(
     @Param('spaceId') spaceId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -45,6 +48,7 @@ export class RecurringController {
   }
 
   @Get()
+  @ApiOkResponse({ type: [RecurringTransactionResponseDto] })
   list(
     @Param('spaceId') spaceId: string,
     @Query() query: ListRecurringQueryDto,
@@ -56,6 +60,7 @@ export class RecurringController {
   }
 
   @Get(':recurringId')
+  @ApiOkResponse({ type: RecurringTransactionResponseDto })
   get(
     @Param('spaceId') spaceId: string,
     @Param('recurringId') recurringId: string,
@@ -64,6 +69,7 @@ export class RecurringController {
   }
 
   @Patch(':recurringId')
+  @ApiOkResponse({ type: RecurringTransactionResponseDto })
   async update(
     @Param('spaceId') spaceId: string,
     @Param('recurringId') recurringId: string,
@@ -80,6 +86,7 @@ export class RecurringController {
   }
 
   @Patch(':recurringId/pause')
+  @ApiOkResponse({ type: RecurringTransactionResponseDto })
   async pause(
     @Param('spaceId') spaceId: string,
     @Param('recurringId') recurringId: string,
@@ -94,6 +101,7 @@ export class RecurringController {
   }
 
   @Patch(':recurringId/resume')
+  @ApiOkResponse({ type: RecurringTransactionResponseDto })
   async resume(
     @Param('spaceId') spaceId: string,
     @Param('recurringId') recurringId: string,

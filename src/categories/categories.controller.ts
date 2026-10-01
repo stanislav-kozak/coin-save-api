@@ -11,6 +11,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ApiCreatedResponse, ApiOkResponse } from '@nestjs/swagger';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
@@ -21,6 +22,7 @@ import { SpaceMemberGuard } from '../common/guards/space-member.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { EventBus } from '../events/event-bus.service';
+import { CategoryResponseDto } from './dto/category-response.dto';
 
 @Controller('spaces/:spaceId/categories')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
@@ -31,6 +33,7 @@ export class CategoriesController {
   ) {}
 
   @Post()
+  @ApiCreatedResponse({ type: CategoryResponseDto })
   async create(
     @Param('spaceId') spaceId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -42,6 +45,7 @@ export class CategoriesController {
   }
 
   @Get()
+  @ApiOkResponse({ type: [CategoryResponseDto] })
   list(
     @Param('spaceId') spaceId: string,
     @Query() query: ListCategoriesQueryDto,
@@ -57,6 +61,7 @@ export class CategoriesController {
   // dynamic-param route declared first would swallow `/reorder` as if it
   // were a categoryId.
   @Patch('reorder')
+  @ApiOkResponse({ type: [CategoryResponseDto] })
   @HttpCode(HttpStatus.OK)
   async reorder(
     @Param('spaceId') spaceId: string,
@@ -72,6 +77,7 @@ export class CategoriesController {
   }
 
   @Get(':categoryId')
+  @ApiOkResponse({ type: CategoryResponseDto })
   get(
     @Param('spaceId') spaceId: string,
     @Param('categoryId') categoryId: string,
@@ -80,6 +86,7 @@ export class CategoriesController {
   }
 
   @Patch(':categoryId')
+  @ApiOkResponse({ type: CategoryResponseDto })
   async update(
     @Param('spaceId') spaceId: string,
     @Param('categoryId') categoryId: string,
@@ -96,6 +103,7 @@ export class CategoriesController {
   }
 
   @Patch(':categoryId/archive')
+  @ApiOkResponse({ type: CategoryResponseDto })
   async archive(
     @Param('spaceId') spaceId: string,
     @Param('categoryId') categoryId: string,
@@ -110,6 +118,7 @@ export class CategoriesController {
   }
 
   @Patch(':categoryId/unarchive')
+  @ApiOkResponse({ type: CategoryResponseDto })
   async unarchive(
     @Param('spaceId') spaceId: string,
     @Param('categoryId') categoryId: string,

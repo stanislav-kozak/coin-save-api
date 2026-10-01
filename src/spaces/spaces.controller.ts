@@ -10,6 +10,7 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { ApiCreatedResponse, ApiOkResponse } from '@nestjs/swagger';
 import type { Membership } from '@prisma/client';
 import { SpacesService } from './spaces.service';
 import { CreateSpaceDto } from './dto/create-space.dto';
@@ -23,6 +24,14 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CurrentMembership } from '../common/decorators/current-membership.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { EventBus } from '../events/event-bus.service';
+import {
+  InvitationResponseDto,
+  MemberResponseDto,
+  MembershipResponseDto,
+  SpaceResponseDto,
+  SpaceWithRoleResponseDto,
+} from './dto/space-response.dto';
+import { MessageResponseDto } from '../common/dto/message-response.dto';
 
 @Controller('spaces')
 @UseGuards(JwtAuthGuard)
@@ -35,22 +44,26 @@ export class SpacesController {
   // No realtime event on creation: a brand-new space has no room with any
   // other subscriber yet, so emitting here would always be a no-op.
   @Post()
+  @ApiCreatedResponse({ type: SpaceResponseDto })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSpaceDto) {
     return this.spacesService.createSpace(user.id, dto.name);
   }
 
   @Get()
+  @ApiOkResponse({ type: [SpaceWithRoleResponseDto] })
   list(@CurrentUser() user: AuthenticatedUser) {
     return this.spacesService.listSpacesForUser(user.id);
   }
 
   @Get(':spaceId')
+  @ApiOkResponse({ type: SpaceResponseDto })
   @UseGuards(SpaceMemberGuard)
   get(@Param('spaceId') spaceId: string) {
     return this.spacesService.getSpace(spaceId);
   }
 
   @Patch(':spaceId')
+  @ApiOkResponse({ type: SpaceResponseDto })
   @UseGuards(SpaceOwnerGuard)
   async update(
     @Param('spaceId') spaceId: string,
@@ -74,12 +87,14 @@ export class SpacesController {
   }
 
   @Get(':spaceId/members')
+  @ApiOkResponse({ type: [MemberResponseDto] })
   @UseGuards(SpaceMemberGuard)
   listMembers(@Param('spaceId') spaceId: string) {
     return this.spacesService.listMembers(spaceId);
   }
 
   @Patch(':spaceId/members/:membershipId')
+  @ApiOkResponse({ type: MembershipResponseDto })
   @UseGuards(SpaceOwnerGuard)
   async changeMemberRole(
     @Param('spaceId') spaceId: string,
@@ -109,6 +124,7 @@ export class SpacesController {
   }
 
   @Post(':spaceId/leave')
+  @ApiOkResponse({ type: MessageResponseDto })
   @UseGuards(SpaceMemberGuard)
   @HttpCode(HttpStatus.OK)
   async leave(
@@ -121,6 +137,7 @@ export class SpacesController {
   }
 
   @Post(':spaceId/invitations')
+  @ApiCreatedResponse({ type: MessageResponseDto })
   @UseGuards(SpaceMemberGuard)
   @HttpCode(HttpStatus.CREATED)
   async invite(
@@ -133,6 +150,7 @@ export class SpacesController {
   }
 
   @Get(':spaceId/invitations')
+  @ApiOkResponse({ type: [InvitationResponseDto] })
   @UseGuards(SpaceMemberGuard)
   listInvitations(@Param('spaceId') spaceId: string) {
     return this.spacesService.listInvitations(spaceId);

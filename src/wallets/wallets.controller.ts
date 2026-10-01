@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { ApiCreatedResponse, ApiOkResponse } from '@nestjs/swagger';
 import { WalletsService } from './wallets.service';
 import { CreateWalletDto } from './dto/create-wallet.dto';
 import { UpdateWalletDto } from './dto/update-wallet.dto';
@@ -17,6 +18,7 @@ import { SpaceMemberGuard } from '../common/guards/space-member.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { EventBus } from '../events/event-bus.service';
+import { WalletResponseDto } from './dto/wallet-response.dto';
 
 @Controller('spaces/:spaceId/wallets')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
@@ -27,6 +29,7 @@ export class WalletsController {
   ) {}
 
   @Post()
+  @ApiCreatedResponse({ type: WalletResponseDto })
   async create(
     @Param('spaceId') spaceId: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -38,6 +41,7 @@ export class WalletsController {
   }
 
   @Get()
+  @ApiOkResponse({ type: [WalletResponseDto] })
   list(@Param('spaceId') spaceId: string, @Query() query: ListWalletsQueryDto) {
     return this.walletsService.listWallets(
       spaceId,
@@ -46,11 +50,13 @@ export class WalletsController {
   }
 
   @Get(':walletId')
+  @ApiOkResponse({ type: WalletResponseDto })
   get(@Param('spaceId') spaceId: string, @Param('walletId') walletId: string) {
     return this.walletsService.getWallet(spaceId, walletId);
   }
 
   @Patch(':walletId')
+  @ApiOkResponse({ type: WalletResponseDto })
   async update(
     @Param('spaceId') spaceId: string,
     @Param('walletId') walletId: string,
@@ -67,6 +73,7 @@ export class WalletsController {
   }
 
   @Patch(':walletId/archive')
+  @ApiOkResponse({ type: WalletResponseDto })
   async archive(
     @Param('spaceId') spaceId: string,
     @Param('walletId') walletId: string,
@@ -78,6 +85,7 @@ export class WalletsController {
   }
 
   @Patch(':walletId/unarchive')
+  @ApiOkResponse({ type: WalletResponseDto })
   async unarchive(
     @Param('spaceId') spaceId: string,
     @Param('walletId') walletId: string,
