@@ -1,7 +1,8 @@
 import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
-import { ApiOkResponse, ApiServiceUnavailableResponse } from '@nestjs/swagger';
+import { ApiOkResponse } from '@nestjs/swagger';
 import { PrismaService } from '../prisma/prisma.service';
 import { HealthResponseDto } from './dto/health-response.dto';
+import { ApiErrorResponse } from '../common/decorators/api-error-response.decorator';
 
 interface HealthCheckResult {
   status: 'ok' | 'error';
@@ -15,7 +16,7 @@ export class HealthController {
 
   @Get()
   @ApiOkResponse({ type: HealthResponseDto })
-  @ApiServiceUnavailableResponse({ type: HealthResponseDto })
+  @ApiErrorResponse(HttpStatus.SERVICE_UNAVAILABLE, 'HTTP_ERROR')
   async check(): Promise<HealthCheckResult> {
     try {
       await this.prisma.$queryRaw`SELECT 1`;

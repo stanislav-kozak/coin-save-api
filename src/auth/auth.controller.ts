@@ -33,6 +33,7 @@ import { ERROR_CODES } from '../common/constants/error-codes';
 import { LoginDto } from './dto/login.dto';
 import { LoginResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
+import { ApiErrorResponse } from '../common/decorators/api-error-response.decorator';
 
 const ACCESS_COOKIE = 'access';
 const REFRESH_COOKIE = 'refresh';
@@ -46,6 +47,9 @@ export class AuthController {
   ) {}
 
   @Post('signup')
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
+  @ApiErrorResponse(HttpStatus.CONFLICT, 'EMAIL_ALREADY_EXISTS')
+  @ApiErrorResponse(HttpStatus.TOO_MANY_REQUESTS, 'HTTP_ERROR')
   @ApiCreatedResponse({ type: MessageResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.CREATED)
@@ -55,6 +59,12 @@ export class AuthController {
   }
 
   @Post('verify-email')
+  @ApiErrorResponse(
+    HttpStatus.BAD_REQUEST,
+    'VALIDATION_ERROR',
+    'INVALID_VERIFICATION_TOKEN',
+  )
+  @ApiErrorResponse(HttpStatus.TOO_MANY_REQUESTS, 'HTTP_ERROR')
   @ApiOkResponse({ type: MessageResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.OK)
@@ -64,6 +74,13 @@ export class AuthController {
   }
 
   @Post('login')
+  @ApiErrorResponse(
+    HttpStatus.UNAUTHORIZED,
+    'INVALID_CREDENTIALS',
+    'HTTP_ERROR',
+  )
+  @ApiErrorResponse(HttpStatus.FORBIDDEN, 'EMAIL_NOT_VERIFIED')
+  @ApiErrorResponse(HttpStatus.TOO_MANY_REQUESTS, 'HTTP_ERROR')
   @ApiBody({ type: LoginDto })
   @ApiOkResponse({ type: LoginResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
@@ -99,6 +116,11 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @ApiErrorResponse(
+    HttpStatus.UNAUTHORIZED,
+    'INVALID_REFRESH_TOKEN',
+    'REFRESH_TOKEN_REUSE_DETECTED',
+  )
   @ApiOkResponse({ type: MessageResponseDto })
   @HttpCode(HttpStatus.OK)
   async refresh(
@@ -126,6 +148,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @ApiErrorResponse(HttpStatus.UNAUTHORIZED, 'HTTP_ERROR')
   @ApiOkResponse({ type: UserResponseDto })
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: AuthenticatedUser) {
@@ -156,6 +179,8 @@ export class AuthController {
   }
 
   @Post('request-password-reset')
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
+  @ApiErrorResponse(HttpStatus.TOO_MANY_REQUESTS, 'HTTP_ERROR')
   @ApiOkResponse({ type: MessageResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.OK)
@@ -167,6 +192,12 @@ export class AuthController {
   }
 
   @Post('reset-password')
+  @ApiErrorResponse(
+    HttpStatus.BAD_REQUEST,
+    'VALIDATION_ERROR',
+    'INVALID_RESET_TOKEN',
+  )
+  @ApiErrorResponse(HttpStatus.TOO_MANY_REQUESTS, 'HTTP_ERROR')
   @ApiOkResponse({ type: MessageResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.OK)

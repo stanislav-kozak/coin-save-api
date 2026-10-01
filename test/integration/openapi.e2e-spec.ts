@@ -11,6 +11,10 @@ import { AppModule } from '../../src/app.module';
 import { AppExceptionFilter } from '../../src/common/filters/app-exception.filter';
 import { MailService } from '../../src/mail/mail.service';
 import { bootstrapSwagger } from '../../src/main';
+import {
+  ERROR_CODES,
+  GENERIC_ERROR_CODES,
+} from '../../src/common/constants/error-codes';
 
 describe('OpenAPI contract (integration)', () => {
   let container: StartedPostgreSqlContainer;
@@ -113,6 +117,72 @@ describe('OpenAPI contract (integration)', () => {
     expect(
       res.body.components.schemas.WalletResponseDto.properties.balance,
     ).toMatchObject({ type: 'string', format: 'decimal' });
+  });
+
+  it('documents the error envelope with every API error code', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/docs.json')
+      .expect(200);
+    const errorSchema = res.body.components.schemas.ErrorResponseDto;
+
+    expect(errorSchema.required).toEqual(
+      expect.arrayContaining(['statusCode', 'code', 'message']),
+    );
+    expect(errorSchema.properties.code.allOf).toEqual([
+      { $ref: '#/components/schemas/ErrorCode' },
+    ]);
+    expect([...res.body.components.schemas.ErrorCode.enum].sort()).toEqual(
+      [
+        ...Object.values(ERROR_CODES),
+        ...Object.values(GENERIC_ERROR_CODES),
+      ].sort(),
+    );
+  });
+
+  it('documents at least one error response for every operation that can fail', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/docs.json')
+      .expect(200);
+    const paths = res.body.paths as Record<
+      string,
+      Record<
+        string,
+        {
+          responses: Record<
+            string,
+            { content?: Record<string, { schema?: { $ref?: string } }> }
+          >;
+        }
+      >
+    >;
+
+    // These cannot fail with an API error envelope: hello-world, logout
+    // (always clears cookies), and the Google OAuth redirects.
+    const neverFails = new Set([
+      'GET /api',
+      'POST /api/auth/logout',
+      'GET /api/auth/google',
+      'GET /api/auth/google/callback',
+    ]);
+    const missing: string[] = [];
+    for (const [path, operations] of Object.entries(paths)) {
+      for (const [method, operation] of Object.entries(operations)) {
+        const key = `${method.toUpperCase()} ${path}`;
+        if (neverFails.has(key)) continue;
+        const hasError = Object.entries(operation.responses).some(
+          ([status, response]) =>
+            Number(status) >= 400 &&
+            response.content?.['application/json']?.schema?.$ref ===
+              '#/components/schemas/ErrorResponseDto',
+        );
+        if (!hasError) missing.push(key);
+      }
+    }
+    expect(missing).toEqual([]);
+
+    expect(
+      Object.keys(paths['/api/spaces/{spaceId}/wallets'].post.responses).sort(),
+    ).toEqual(['201', '400', '401', '403']);
   });
 
   it('serves the interactive Swagger UI at /api/docs', async () => {

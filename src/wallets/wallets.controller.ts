@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -19,9 +20,12 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { EventBus } from '../events/event-bus.service';
 import { WalletResponseDto } from './dto/wallet-response.dto';
+import { ApiErrorResponse } from '../common/decorators/api-error-response.decorator';
 
 @Controller('spaces/:spaceId/wallets')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
+@ApiErrorResponse(HttpStatus.UNAUTHORIZED, 'HTTP_ERROR')
+@ApiErrorResponse(HttpStatus.FORBIDDEN, 'FORBIDDEN_NOT_MEMBER')
 export class WalletsController {
   constructor(
     private readonly walletsService: WalletsService,
@@ -29,6 +33,7 @@ export class WalletsController {
   ) {}
 
   @Post()
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
   @ApiCreatedResponse({ type: WalletResponseDto })
   async create(
     @Param('spaceId') spaceId: string,
@@ -41,6 +46,7 @@ export class WalletsController {
   }
 
   @Get()
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
   @ApiOkResponse({ type: [WalletResponseDto] })
   list(@Param('spaceId') spaceId: string, @Query() query: ListWalletsQueryDto) {
     return this.walletsService.listWallets(
@@ -50,12 +56,15 @@ export class WalletsController {
   }
 
   @Get(':walletId')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'WALLET_NOT_FOUND')
   @ApiOkResponse({ type: WalletResponseDto })
   get(@Param('spaceId') spaceId: string, @Param('walletId') walletId: string) {
     return this.walletsService.getWallet(spaceId, walletId);
   }
 
   @Patch(':walletId')
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'WALLET_NOT_FOUND')
   @ApiOkResponse({ type: WalletResponseDto })
   async update(
     @Param('spaceId') spaceId: string,
@@ -73,6 +82,7 @@ export class WalletsController {
   }
 
   @Patch(':walletId/archive')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'WALLET_NOT_FOUND')
   @ApiOkResponse({ type: WalletResponseDto })
   async archive(
     @Param('spaceId') spaceId: string,
@@ -85,6 +95,7 @@ export class WalletsController {
   }
 
   @Patch(':walletId/unarchive')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'WALLET_NOT_FOUND')
   @ApiOkResponse({ type: WalletResponseDto })
   async unarchive(
     @Param('spaceId') spaceId: string,

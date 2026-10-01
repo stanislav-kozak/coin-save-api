@@ -23,9 +23,12 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { EventBus } from '../events/event-bus.service';
 import { CategoryResponseDto } from './dto/category-response.dto';
+import { ApiErrorResponse } from '../common/decorators/api-error-response.decorator';
 
 @Controller('spaces/:spaceId/categories')
 @UseGuards(JwtAuthGuard, SpaceMemberGuard)
+@ApiErrorResponse(HttpStatus.UNAUTHORIZED, 'HTTP_ERROR')
+@ApiErrorResponse(HttpStatus.FORBIDDEN, 'FORBIDDEN_NOT_MEMBER')
 export class CategoriesController {
   constructor(
     private readonly categoriesService: CategoriesService,
@@ -33,6 +36,8 @@ export class CategoriesController {
   ) {}
 
   @Post()
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
+  @ApiErrorResponse(HttpStatus.CONFLICT, 'CATEGORY_NAME_TAKEN')
   @ApiCreatedResponse({ type: CategoryResponseDto })
   async create(
     @Param('spaceId') spaceId: string,
@@ -45,6 +50,7 @@ export class CategoriesController {
   }
 
   @Get()
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
   @ApiOkResponse({ type: [CategoryResponseDto] })
   list(
     @Param('spaceId') spaceId: string,
@@ -61,6 +67,11 @@ export class CategoriesController {
   // dynamic-param route declared first would swallow `/reorder` as if it
   // were a categoryId.
   @Patch('reorder')
+  @ApiErrorResponse(
+    HttpStatus.BAD_REQUEST,
+    'VALIDATION_ERROR',
+    'INVALID_REORDER',
+  )
   @ApiOkResponse({ type: [CategoryResponseDto] })
   @HttpCode(HttpStatus.OK)
   async reorder(
@@ -77,6 +88,7 @@ export class CategoriesController {
   }
 
   @Get(':categoryId')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'CATEGORY_NOT_FOUND')
   @ApiOkResponse({ type: CategoryResponseDto })
   get(
     @Param('spaceId') spaceId: string,
@@ -86,6 +98,9 @@ export class CategoriesController {
   }
 
   @Patch(':categoryId')
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'CATEGORY_NOT_FOUND')
+  @ApiErrorResponse(HttpStatus.CONFLICT, 'CATEGORY_NAME_TAKEN')
   @ApiOkResponse({ type: CategoryResponseDto })
   async update(
     @Param('spaceId') spaceId: string,
@@ -103,6 +118,7 @@ export class CategoriesController {
   }
 
   @Patch(':categoryId/archive')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'CATEGORY_NOT_FOUND')
   @ApiOkResponse({ type: CategoryResponseDto })
   async archive(
     @Param('spaceId') spaceId: string,
@@ -118,6 +134,7 @@ export class CategoriesController {
   }
 
   @Patch(':categoryId/unarchive')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'CATEGORY_NOT_FOUND')
   @ApiOkResponse({ type: CategoryResponseDto })
   async unarchive(
     @Param('spaceId') spaceId: string,
@@ -133,6 +150,7 @@ export class CategoriesController {
   }
 
   @Delete(':categoryId')
+  @ApiErrorResponse(HttpStatus.NOT_FOUND, 'CATEGORY_NOT_FOUND')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
     @Param('spaceId') spaceId: string,
