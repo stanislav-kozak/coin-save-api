@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  HttpException,
   HttpStatus,
   Post,
   Req,
@@ -37,6 +38,11 @@ import { ApiErrorResponse } from '../common/decorators/api-error-response.decora
 
 const ACCESS_COOKIE = 'access';
 const REFRESH_COOKIE = 'refresh';
+// Non-secret "a session exists" hint on path=/ so the frontend middleware can
+// tell a logged-in user apart after the 15-minute access cookie expires (the
+// refresh cookie is only sent to /api/auth). Lives as long as the refresh token.
+const SESSION_COOKIE = 'session';
+const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const THROTTLE_5_PER_MIN = { default: { limit: 5, ttl: 60_000 } };
 
 @Controller('auth')
@@ -110,8 +116,7 @@ export class AuthController {
     if (refreshToken) {
       await this.authService.logout(refreshToken);
     }
-    res.clearCookie(ACCESS_COOKIE, { path: '/' });
-    res.clearCookie(REFRESH_COOKIE, { path: '/api/auth' });
+    this.clearAuthCookies(res);
     return { message: 'Logged out' };
   }
 
@@ -127,24 +132,38 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<{ message: string }> {
-    const presented = this.extractRefreshToken(req);
-    if (!presented) {
-      throw new AppException(
-        ERROR_CODES.INVALID_REFRESH_TOKEN,
-        HttpStatus.UNAUTHORIZED,
-        'Invalid refresh token',
-      );
-    }
+    try {
+      const presented = this.extractRefreshToken(req);
+      if (!presented) {
+        throw new AppException(
+          ERROR_CODES.INVALID_REFRESH_TOKEN,
+          HttpStatus.UNAUTHORIZED,
+          'Invalid refresh token',
+        );
+      }
 
-    const { accessToken, refreshToken } = await this.authService.refresh(
-      presented,
-      {
-        userAgent: req.headers['user-agent'],
-        ipAddress: req.ip,
-      },
-    );
-    this.setAuthCookies(res, accessToken, refreshToken);
-    return { message: 'Refreshed' };
+      const { accessToken, refreshToken } = await this.authService.refresh(
+        presented,
+        {
+          userAgent: req.headers['user-agent'],
+          ipAddress: req.ip,
+        },
+      );
+      this.setAuthCookies(res, accessToken, refreshToken);
+      return { message: 'Refreshed' };
+    } catch (error) {
+      // A rejected refresh means the session is over: drop the session hint
+      // too, otherwise the frontend middleware would keep letting the user in
+      // and bounce between the app and /login. Transient failures (5xx) keep
+      // the cookies so a retry can still succeed.
+      if (
+        error instanceof HttpException &&
+        error.getStatus() === Number(HttpStatus.UNAUTHORIZED)
+      ) {
+        this.clearAuthCookies(res);
+      }
+      throw error;
+    }
   }
 
   @Get('me')
@@ -235,7 +254,20 @@ export class AuthController {
       secure: true,
       sameSite: 'lax',
       path: '/api/auth',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
+      maxAge: REFRESH_TTL_MS,
     });
+    res.cookie(SESSION_COOKIE, '1', {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: REFRESH_TTL_MS,
+    });
+  }
+
+  private clearAuthCookies(res: Response): void {
+    res.clearCookie(ACCESS_COOKIE, { path: '/' });
+    res.clearCookie(REFRESH_COOKIE, { path: '/api/auth' });
+    res.clearCookie(SESSION_COOKIE, { path: '/' });
   }
 }
