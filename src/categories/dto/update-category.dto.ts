@@ -28,10 +28,16 @@ export class UpdateCategoryDto {
   })
   color?: string;
 
+  // Absent: unchanged. null: removes the limit (IsOptional skips the number
+  // checks for null). A number: sets it.
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 4 })
-  @ApiPositiveAmountProperty({ required: false })
+  @ApiPositiveAmountProperty({
+    required: false,
+    nullable: true,
+    description: 'Omit to keep the current limit; null removes it',
+  })
   @IsPositive()
   @Max(1_000_000_000)
-  monthlyLimit?: number;
+  monthlyLimit?: number | null;
 }

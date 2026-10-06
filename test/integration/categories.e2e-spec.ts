@@ -113,6 +113,25 @@ describe('Categories flow (integration)', () => {
     expect(updateRes.body.name).toBe('Kids & Toys');
     expect(Number(updateRes.body.monthlyLimit)).toBe(750);
 
+    // Absent monthlyLimit leaves it unchanged; null removes the limit.
+    const renameOnly = await agent
+      .patch(`/api/spaces/${spaceId}/categories/${categoryId}`)
+      .send({ name: 'Kids' })
+      .expect(200);
+    expect(Number(renameOnly.body.monthlyLimit)).toBe(750);
+
+    const cleared = await agent
+      .patch(`/api/spaces/${spaceId}/categories/${categoryId}`)
+      .send({ monthlyLimit: null })
+      .expect(200);
+    expect(cleared.body.monthlyLimit).toBeNull();
+    expect(cleared.body.name).toBe('Kids');
+
+    await agent
+      .patch(`/api/spaces/${spaceId}/categories/${categoryId}`)
+      .send({ monthlyLimit: 0 })
+      .expect(400);
+
     await agent
       .patch(`/api/spaces/${spaceId}/categories/${categoryId}/archive`)
       .expect(200);
