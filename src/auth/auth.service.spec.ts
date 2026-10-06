@@ -17,6 +17,7 @@ function buildService(
     updatePassword: vi.fn(),
     createLocal: vi.fn(),
     deleteById: vi.fn(),
+    markEmailVerified: vi.fn(),
     ...overrides.users,
   };
   const prisma = {
@@ -324,5 +325,26 @@ describe('AuthService', () => {
 
     expect(users.findByEmail).toHaveBeenCalledWith('olena@b.com');
     expect(user).toEqual({ id: 'u1', email: 'olena@b.com' });
+  });
+
+  it('treats reopening an already-used verification link as success', async () => {
+    const rawToken = 'v'.repeat(64);
+    const used = {
+      id: 'evt1',
+      userId: 'u1',
+      tokenHash: await argon2.hash(rawToken),
+      usedAt: new Date(Date.now() - 60_000),
+      expiresAt: new Date(Date.now() + 60_000),
+    };
+    const { service, prisma, users } = buildService();
+    prisma.emailVerificationToken.findMany.mockResolvedValue([used]);
+
+    await expect(service.verifyEmail(rawToken)).resolves.toBeUndefined();
+
+    expect(prisma.emailVerificationToken.findMany).toHaveBeenCalledWith({
+      where: { expiresAt: { gt: expect.any(Date) as Date } },
+    });
+    expect(prisma.emailVerificationToken.update).not.toHaveBeenCalled();
+    expect(users.markEmailVerified).not.toHaveBeenCalled();
   });
 });

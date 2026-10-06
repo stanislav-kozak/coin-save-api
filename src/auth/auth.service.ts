@@ -108,8 +108,11 @@ export class AuthService {
   }
 
   async verifyEmail(token: string): Promise<void> {
+    // Used links are included (they stay bounded by the 24h expiry) so that
+    // reopening one — a second tab, an email client prefetching the link —
+    // answers "verified" instead of "invalid".
     const candidates = await this.prisma.emailVerificationToken.findMany({
-      where: { usedAt: null, expiresAt: { gt: new Date() } },
+      where: { expiresAt: { gt: new Date() } },
     });
 
     const matched = await findMatchingToken(candidates, token);
@@ -119,6 +122,9 @@ export class AuthService {
         HttpStatus.BAD_REQUEST,
         'Invalid or expired verification token',
       );
+    }
+    if (matched.usedAt) {
+      return;
     }
 
     await this.prisma.emailVerificationToken.update({
