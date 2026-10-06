@@ -154,5 +154,5 @@ jobs:
             fi
             mv .env.new .env
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-            ./deploy.sh "$IMAGE_TAG" || { docker logout ghcr.io; exit 1; }
+            ./deploy.sh api "$IMAGE_TAG" || { docker logout ghcr.io; exit 1; }
             docker logout ghcr.io

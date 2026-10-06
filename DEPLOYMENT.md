@@ -3,6 +3,18 @@
 Як бекенд потрапляє на VPS, де лежать налаштування і що робити, коли щось
 пішло не так.
 
+На VPS працюють три сервіси з `docker-compose.prod.yml` цього репо:
+`api` (бекенд), `web` (фронтенд, образ з репо coin-save-app) і `caddy`
+(HTTPS, `/api` і `/socket.io` → api, решта → web).
+
+- мерж у `main` **бекенду** оновлює лише `api`: `./deploy.sh api <sha>`;
+- мерж у `main` **фронтенду** оновлює лише `web`: CI coin-save-app заходить
+  у цю ж папку на VPS і виконує `./deploy.sh web <sha>`.
+
+Деплої не заважають один одному: кожен перезапускає тільки свій сервіс
+(`--no-deps`), а одночасні запуски стають у чергу (`flock`). Зміни
+`Caddyfile` застосовуються при будь-якому деплої (`caddy reload`).
+
 ## Як це працює
 
 Workflow `.github/workflows/ci-cd.yml` працює так: тести один раз на PR,
@@ -18,11 +30,11 @@ Workflow `.github/workflows/ci-cd.yml` працює так: тести один 
    - збирає `.env` з налаштувань GitHub (див. нижче);
    - заходить на VPS по SSH і робить `git pull`;
    - кладе туди новий `.env`, а попередній зберігає як `.env.bak`;
-   - запускає `./deploy.sh <sha>`.
+   - запускає `./deploy.sh api <sha>`.
 
-   `deploy.sh` завантажує образ, перезапускає контейнери і до 60 секунд
-   чекає, поки `/api/health` відповість 200. Якщо не дочекався, виводить
-   логи, і деплой стає червоним.
+   `deploy.sh` завантажує образ, перезапускає сервіс і до 60 секунд чекає,
+   поки сервіс відповість зсередини контейнера (`/api/health` для api,
+   `/` для web). Якщо не дочекався, виводить логи, і деплой стає червоним.
 
 Міграції БД (`prisma migrate deploy`) запускаються автоматично при старті
 контейнера (`docker-entrypoint.sh`).
@@ -130,6 +142,16 @@ ssh-keygen -t ed25519 -f coinsave-deploy -N "" -C "github-actions-deploy"
 - образ у GHCR приватний: CI логіниться в реєстр сам на час деплою, на VPS
   нічого зберігати не треба.
 
+## Фронтенд (репо coin-save-app)
+
+Його CI збирає `ghcr.io/stanislav-kozak/coin-save-app:{main,<sha>}` і
+деплоїть через SSH у **цю** папку (`VPS_APP_DIR` бекенду). Клон фронтового
+репо на VPS не потрібен. У репо coin-save-app потрібні власні Secrets
+`VPS_HOST`, `VPS_PORT`, `VPS_USER`, `VPS_APP_DIR` (той самий шлях, що й
+тут) і `VPS_SSH_KEY` (бажано окремий ключ, доданий у той самий
+`authorized_keys`). `.env` фронтовий деплой не чіпає: секрети бекенду
+фронту не потрібні.
+
 ## Домен і пошта (coinsavekeeper.com)
 
 DNS у Cloudflare:
@@ -170,7 +192,8 @@ HTTPS обслуговує Caddy (`Caddyfile`): `/api/*` і `/socket.io/*` йд�
 ```bash
 cd <VPS_APP_DIR>
 docker login ghcr.io -u <github-user>   # пароль: GitHub token з правом read:packages
-./deploy.sh <sha-попереднього-коміту>   # sha видно в історії main або в Actions
+./deploy.sh api <sha-попереднього-коміту>   # sha видно в історії main або в Actions
+# фронтенд так само: ./deploy.sh web <sha коміту coin-save-app>
 docker logout ghcr.io
 ```
 

@@ -1,34 +1,63 @@
 #!/bin/sh
-# Deploys the API on the VPS. Run from the repo checkout:
-#   ./deploy.sh [image-tag]   (default: main; pass a commit SHA to roll back)
-# Requires `docker login ghcr.io` beforehand (CI does this automatically).
+# Deploys one service on the VPS. Run from this repo's checkout:
+#   ./deploy.sh api [image-tag]   backend  (CI of coin-save-api)
+#   ./deploy.sh web [image-tag]   frontend (CI of coin-save-app)
+# image-tag defaults to main; pass an older commit SHA to roll back.
+# Only the named service is restarted, so a backend deploy never touches the
+# frontend and vice versa. Requires `docker login ghcr.io` beforehand (CI
+# does this automatically).
 set -eu
 
-TAG="${1:-main}"
+SERVICE="${1:-}"
+TAG="${2:-main}"
 COMPOSE="docker compose -f docker-compose.prod.yml"
+
+case "$SERVICE" in
+  api)
+    export API_IMAGE_TAG="$TAG"
+    HEALTH_URL="http://localhost:3000/api/health"
+    ;;
+  web)
+    export WEB_IMAGE_TAG="$TAG"
+    HEALTH_URL="http://localhost:3000/"
+    ;;
+  *)
+    echo "usage: $0 <api|web> [image-tag]" >&2
+    exit 2
+    ;;
+esac
+
+# Both repos deploy to this VPS; never let two deploys run at the same time.
+exec 9>/tmp/coinsave-deploy.lock
+echo "==> Waiting for deploy lock"
+flock -w 600 9
 
 echo "==> Updating compose/Caddy config from git"
 git pull --ff-only origin main
 
-echo "==> Pulling image tag: $TAG"
-export API_IMAGE_TAG="$TAG"
-$COMPOSE pull api
+echo "==> Pulling $SERVICE image tag: $TAG"
+$COMPOSE pull "$SERVICE"
 
-echo "==> Restarting containers"
-$COMPOSE up -d --no-build --remove-orphans
+echo "==> Restarting $SERVICE (and Caddy if needed)"
+# --no-deps: never recreate the other app as a side effect (e.g. a frontend
+# deploy must not move the API off a pinned rollback tag).
+$COMPOSE up -d --no-build --no-deps --remove-orphans "$SERVICE" caddy
 
-echo "==> Waiting for /api/health"
-# Ask the API container directly, so the check doesn't depend on Caddy's
-# domain/TLS setup.
+# Caddyfile is bind-mounted, so compose does not notice when it changes;
+# reload it explicitly (a no-op when nothing changed).
+$COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null
+
+echo "==> Waiting for $SERVICE to become healthy"
+# Ask the container directly, so the check doesn't depend on Caddy/TLS.
 for i in $(seq 1 30); do
-  if $COMPOSE exec -T api wget -qO- http://localhost:3000/api/health >/dev/null 2>&1; then
-    echo "==> Healthy after $((i * 2))s"
+  if $COMPOSE exec -T "$SERVICE" wget -qO- "$HEALTH_URL" >/dev/null 2>&1; then
+    echo "==> $SERVICE healthy after $((i * 2))s"
     docker image prune -f >/dev/null
     exit 0
   fi
   sleep 2
 done
 
-echo "!! API did not become healthy within 60s; recent logs:" >&2
-$COMPOSE logs --tail=100 api >&2
+echo "!! $SERVICE did not become healthy within 60s; recent logs:" >&2
+$COMPOSE logs --tail=100 "$SERVICE" >&2
 exit 1
