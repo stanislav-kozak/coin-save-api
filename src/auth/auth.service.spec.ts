@@ -15,6 +15,7 @@ function buildService(
   const users = {
     findByEmail: vi.fn(),
     createLocal: vi.fn(),
+    deleteById: vi.fn(),
     ...overrides.users,
   };
   const prisma = {
@@ -107,6 +108,35 @@ describe('AuthService', () => {
       expect.any(String),
       'Olena',
     );
+  });
+
+  it('rolls the signup back and reports 503 when the verification email cannot be sent', async () => {
+    const created = { id: 'u1', email: 'a@b.com', locale: 'uk' };
+    const smtpError = new Error('450 domain is not verified');
+    const { service, users, prisma } = buildService({
+      users: {
+        findByEmail: vi.fn().mockResolvedValue(null),
+        createLocal: vi.fn().mockResolvedValue(created),
+      },
+      mail: { send: vi.fn().mockRejectedValue(smtpError) },
+    });
+
+    const error = await service
+      .signup('a@b.com', 'password123')
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(AppException);
+    expect((error as AppException).getStatus()).toBe(
+      HttpStatus.SERVICE_UNAVAILABLE,
+    );
+    expect((error as AppException).getResponse()).toMatchObject({
+      code: 'EMAIL_DELIVERY_FAILED',
+    });
+    expect((error as AppException).cause).toBe(smtpError);
+    expect(prisma.emailVerificationToken.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'u1' },
+    });
+    expect(users.deleteById).toHaveBeenCalledWith('u1');
   });
 
   it('rejects login with a wrong password', async () => {

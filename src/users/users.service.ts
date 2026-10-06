@@ -45,6 +45,10 @@ export class UsersService {
     return this.prisma.user.create({ data: { email, passwordHash, name } });
   }
 
+  async deleteById(id: string): Promise<void> {
+    await this.prisma.user.delete({ where: { id } });
+  }
+
   markEmailVerified(userId: string): Promise<User> {
     return this.prisma.user.update({
       where: { id: userId },

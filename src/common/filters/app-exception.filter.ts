@@ -91,9 +91,20 @@ export class AppExceptionFilter implements ExceptionFilter {
       typeof body === 'object' && body !== null && 'code' in body
         ? ` ${String(body.code)}`
         : '';
+    // An AppException may wrap the real failure (e.g. an SMTP error); log
+    // that, since the AppException's own message/stack say little.
+    const cause = exception instanceof Error ? exception.cause : undefined;
+    const causeText =
+      cause instanceof Error ? ` (caused by: ${cause.message})` : '';
     const message =
-      exception instanceof Error ? exception.message : String(exception);
-    const stack = exception instanceof Error ? exception.stack : undefined;
+      (exception instanceof Error ? exception.message : String(exception)) +
+      causeText;
+    const stack =
+      cause instanceof Error
+        ? cause.stack
+        : exception instanceof Error
+          ? exception.stack
+          : undefined;
 
     this.logger.error(
       redact(`${route} -> ${status}${code}: ${message}`),

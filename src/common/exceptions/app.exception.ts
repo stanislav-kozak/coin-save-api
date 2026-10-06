@@ -7,7 +7,8 @@ export class AppException extends HttpException {
     statusCode: number,
     message: string,
     details?: Record<string, unknown>,
+    options?: { cause?: unknown },
   ) {
-    super({ code, message, details }, statusCode);
+    super({ code, message, details }, statusCode, options);
   }
 }
