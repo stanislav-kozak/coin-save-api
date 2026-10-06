@@ -86,6 +86,8 @@ jobs:
           script: |
             set -e
             cd "${{ secrets.VPS_APP_DIR }}"
+            # Pull first so the newest deploy.sh is the one that runs.
+            git pull --ff-only origin main
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             ./deploy.sh "$IMAGE_TAG" || { docker logout ghcr.io; exit 1; }
             docker logout ghcr.io
