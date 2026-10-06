@@ -97,6 +97,11 @@ describe('Auth flow (integration)', () => {
       .post('/api/auth/verify-email')
       .send({ token: verifyToken })
       .expect(200);
+    // Opening the same link again (second tab, email client prefetch) is fine.
+    await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
 
     const loginRes = await request(app.getHttpServer())
       .post('/api/auth/login')
