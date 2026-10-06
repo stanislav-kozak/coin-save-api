@@ -5,12 +5,15 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Redeploy the current main image, e.g. after changing settings in GitHub.
+  workflow_dispatch:
 
 env:
   IMAGE: ghcr.io/stanislav-kozak/coin-save-api
 
 jobs:
   check:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       # prisma.config.ts reads DATABASE_URL at generate time; no DB is needed.
@@ -23,6 +26,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
+      - name: Deploy maps every .env.example key
+        run: |
+          missing=""
+          for key in $(grep -oE '^[A-Z][A-Z0-9_]*=' .env.example | tr -d '='); do
+            grep -qE "^ +$key: \\$\\{\\{ (secrets|vars)\\.$key \\}\\}" .github/workflows/ci-cd.yml \
+              || missing="$missing $key"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Map these .env.example keys in the deploy job:$missing"
+            exit 1
+          fi
       - name: Lint
         run: npx eslint "{src,apps,libs,test}/**/*.ts" --max-warnings=0
       - name: Format
@@ -60,6 +74,12 @@ jobs:
 
   deploy:
     needs: docker
+    # Runs after a successful image build on push, or on its own when started
+    # manually (docker is skipped then) — only ever from main.
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      (needs.docker.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && needs.docker.result == 'skipped'))
     runs-on: ubuntu-latest
     environment: production
     # Never run two deploys at once; queue the newer one instead.
@@ -70,9 +90,29 @@ jobs:
       contents: read
       packages: read
     steps:
+      - uses: actions/checkout@v4
+      # Settings live in the `production` environment: secrets for credentials,
+      # variables for plain config. Every key of .env.example must be mapped here.
+      - name: Render .env from GitHub settings
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          MAIL_FROM: ${{ vars.MAIL_FROM }}
+          FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+          CORS_ORIGIN: ${{ vars.CORS_ORIGIN }}
+          SENTRY_DSN_BACKEND: ${{ secrets.SENTRY_DSN_BACKEND }}
+          NODE_ENV: ${{ vars.NODE_ENV }}
+        run: |
+          ENV_B64="$(scripts/ci/render-env.sh | base64 -w0)"
+          echo "::add-mask::$ENV_B64"
+          echo "ENV_B64=$ENV_B64" >> "$GITHUB_ENV"
       - uses: appleboy/ssh-action@v1
         env:
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_TAG: ${{ github.event_name == 'push' && github.sha || 'main' }}
           GHCR_USER: ${{ github.actor }}
           # Short-lived job token: lets the VPS pull the private image without
           # storing a long-lived registry credential there.
@@ -82,12 +122,17 @@ jobs:
           port: ${{ secrets.VPS_PORT || 22 }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN,ENV_B64
           script: |
             set -e
             cd "${{ secrets.VPS_APP_DIR }}"
             # Pull first so the newest deploy.sh is the one that runs.
             git pull --ff-only origin main
+            # .env is managed from GitHub; keep the previous one for rollback.
+            umask 077
+            if [ -f .env ]; then cp .env .env.bak; fi
+            printf '%s' "$ENV_B64" | base64 -d > .env.new
+            mv .env.new .env
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             ./deploy.sh "$IMAGE_TAG" || { docker logout ghcr.io; exit 1; }
             docker logout ghcr.io
