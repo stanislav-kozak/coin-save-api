@@ -12,6 +12,9 @@ import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 
 const MAX_PAST_YEARS = 5;
+// Phones whose clock runs a little fast send "now" slightly in the future;
+// tolerate that instead of rejecting every just-made expense.
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 export interface CreateExpenseInput {
   walletId: string;
@@ -202,7 +205,7 @@ export class ExpensesService {
       );
     }
     const now = new Date();
-    if (date.getTime() > now.getTime()) {
+    if (date.getTime() > now.getTime() + MAX_CLOCK_SKEW_MS) {
       throw new AppException(
         ERROR_CODES.INVALID_OCCURRED_AT,
         HttpStatus.BAD_REQUEST,
