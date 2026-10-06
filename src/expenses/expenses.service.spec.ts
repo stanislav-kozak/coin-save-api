@@ -249,6 +249,47 @@ describe('ExpensesService', () => {
       }
     });
 
+    it('accepts an occurredAt slightly ahead of the server clock (phone clock skew)', async () => {
+      // now = 12:00:00; up to 5 minutes ahead is tolerated
+      for (const occurredAt of [
+        '2026-06-15T12:02:00.000Z',
+        '2026-06-15T12:05:00.000Z',
+      ]) {
+        const { service, prisma } = buildService();
+        prisma.expense.create.mockResolvedValue({ id: 'e1' });
+
+        await service.createExpense('s1', 'u1', {
+          walletId: 'w1',
+          type: TransactionType.EXPENSE,
+          amount: 10,
+          occurredAt,
+        });
+
+        expect(prisma.expense.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            occurredAt: new Date(occurredAt),
+          }) as unknown,
+        });
+      }
+    });
+
+    it('rejects an occurredAt more than 5 minutes ahead', async () => {
+      const { service } = buildService();
+
+      await expect(
+        service.createExpense('s1', 'u1', {
+          walletId: 'w1',
+          type: TransactionType.EXPENSE,
+          amount: 10,
+          occurredAt: '2026-06-15T12:05:01.000Z',
+        }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'INVALID_OCCURRED_AT',
+        }) as unknown,
+      });
+    });
+
     it('throws INVALID_OCCURRED_AT when occurredAt is more than 5 years in the past', async () => {
       const { service } = buildService();
 
