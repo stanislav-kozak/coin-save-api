@@ -1,0 +1,93 @@
+name: CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  IMAGE: ghcr.io/stanislav-kozak/coin-save-api
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # prisma.config.ts reads DATABASE_URL at generate time; no DB is needed.
+      DATABASE_URL: postgresql://user:password@localhost:5432/db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Lint
+        run: npx eslint "{src,apps,libs,test}/**/*.ts" --max-warnings=0
+      - name: Format
+        run: npx prettier --check "src/**/*.ts" "test/**/*.ts"
+      - run: npm run typecheck
+      - run: npm run test
+      # Integration tests start their own Postgres via testcontainers.
+      - run: npm run test:e2e
+      - run: npm run build
+
+  docker:
+    needs: check
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:main
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: docker
+    runs-on: ubuntu-latest
+    environment: production
+    # Never run two deploys at once; queue the newer one instead.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: appleboy/ssh-action@v1
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          GHCR_USER: ${{ github.actor }}
+          # Short-lived job token: lets the VPS pull the private image without
+          # storing a long-lived registry credential there.
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
+          script: |
+            set -e
+            cd "${{ secrets.VPS_APP_DIR }}"
+            # Pull first so the newest deploy.sh is the one that runs.
+            git pull --ff-only origin main
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            ./deploy.sh "$IMAGE_TAG" || { docker logout ghcr.io; exit 1; }
+            docker logout ghcr.io
