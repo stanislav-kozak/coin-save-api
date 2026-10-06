@@ -12,6 +12,15 @@ services:
     expose:
       - "3000"
 
+  web:
+    # Frontend (coin-save-app). Its own CI builds this image and deploys it
+    # with `./deploy.sh web <sha>`; no env_file: it needs none of the API's
+    # secrets (browser calls /api on the same origin via Caddy).
+    image: ghcr.io/stanislav-kozak/coin-save-app:${WEB_IMAGE_TAG:-main}
+    restart: unless-stopped
+    expose:
+      - "3000"
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
