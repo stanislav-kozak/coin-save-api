@@ -73,7 +73,7 @@ describe('Auth flow (integration)', () => {
 
     await request(app.getHttpServer())
       .post('/api/auth/signup')
-      .send({ email, password })
+      .send({ email, password, name: 'Olena' })
       .expect(201);
 
     const verifyEmail = capturedEmails.find((e) => e.to === email);
@@ -111,6 +111,7 @@ describe('Auth flow (integration)', () => {
       'updatedAt',
     ]);
     expect(meRes.body.email).toBe(email);
+    expect(meRes.body.name).toBe('Olena');
 
     const refreshRes = await request(app.getHttpServer())
       .post('/api/auth/refresh')

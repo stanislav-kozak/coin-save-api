@@ -59,7 +59,33 @@ describe('AuthController', () => {
       .send({ email: 'a@b.com', password: 'password123' })
       .expect(201);
 
-    expect(authService.signup).toHaveBeenCalledWith('a@b.com', 'password123');
+    expect(authService.signup).toHaveBeenCalledWith(
+      'a@b.com',
+      'password123',
+      undefined,
+    );
+  });
+
+  it('POST /auth/signup passes a trimmed display name to AuthService.signup', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/signup')
+      .send({ email: 'n@b.com', password: 'password123', name: '  Olena  ' })
+      .expect(201);
+
+    expect(authService.signup).toHaveBeenCalledWith(
+      'n@b.com',
+      'password123',
+      'Olena',
+    );
+  });
+
+  it('POST /auth/signup rejects a blank or over-long name with 400', async () => {
+    for (const name of ['   ', 'x'.repeat(101)]) {
+      await request(app.getHttpServer())
+        .post('/auth/signup')
+        .send({ email: 'n@b.com', password: 'password123', name })
+        .expect(400);
+    }
   });
 
   it('POST /auth/signup rejects an invalid email with 400', async () => {

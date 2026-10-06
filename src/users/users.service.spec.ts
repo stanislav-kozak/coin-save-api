@@ -14,6 +14,17 @@ describe('UsersService', () => {
     });
   });
 
+  it('creates a local user with an optional display name', async () => {
+    const prisma = { user: { create: vi.fn().mockResolvedValue({}) } };
+    const service = new UsersService(prisma as never);
+
+    await service.createLocal('a@b.com', 'hash', 'Olena');
+
+    expect(prisma.user.create).toHaveBeenCalledWith({
+      data: { email: 'a@b.com', passwordHash: 'hash', name: 'Olena' },
+    });
+  });
+
   it('finds a public user profile by id without selecting the password hash', async () => {
     const found = { id: 'u1', email: 'a@b.com' };
     const prisma = { user: { findUnique: vi.fn().mockResolvedValue(found) } };

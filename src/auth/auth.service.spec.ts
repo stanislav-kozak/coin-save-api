@@ -76,6 +76,7 @@ describe('AuthService', () => {
     expect(users.createLocal).toHaveBeenCalledWith(
       'a@b.com',
       expect.any(String),
+      undefined,
     );
     expect(prisma.emailVerificationToken.create).toHaveBeenCalledTimes(1);
     expect(mail.send).toHaveBeenCalledWith(
@@ -86,6 +87,24 @@ describe('AuthService', () => {
       expect.objectContaining({
         verifyUrl: expect.stringContaining('/verify-email?token='),
       }),
+    );
+  });
+
+  it('stores the optional display name on signup', async () => {
+    const created = { id: 'u1', email: 'a@b.com', locale: 'uk' };
+    const { service, users } = buildService({
+      users: {
+        findByEmail: vi.fn().mockResolvedValue(null),
+        createLocal: vi.fn().mockResolvedValue(created),
+      },
+    });
+
+    await service.signup('a@b.com', 'password123', 'Olena');
+
+    expect(users.createLocal).toHaveBeenCalledWith(
+      'a@b.com',
+      expect.any(String),
+      'Olena',
     );
   });
 
