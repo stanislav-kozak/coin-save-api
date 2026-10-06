@@ -30,7 +30,7 @@ jobs:
         run: |
           missing=""
           for key in $(grep -oE '^[A-Z][A-Z0-9_]*=' .env.example | tr -d '='); do
-            grep -qE "^ +$key: \\$\\{\\{ (secrets|vars)\\.$key \\}\\}" .github/workflows/ci-cd.yml \
+            grep -qE "^ +$key: \\$\\{\\{ vars\\.$key \\|\\| secrets\\.$key \\}\\}" .github/workflows/ci-cd.yml \
               || missing="$missing $key"
           done
           if [ -n "$missing" ]; then
@@ -91,23 +91,31 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@v4
-      # Settings live in the `production` environment: secrets for credentials,
-      # variables for plain config. Every key of .env.example must be mapped here.
+      # Settings live in the `production` environment: Secrets for credentials,
+      # Variables for plain config (either works for any key).
+      # Every key of .env.example must be mapped here.
       - name: Render .env from GitHub settings
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
-          JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
-          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-          MAIL_FROM: ${{ vars.MAIL_FROM }}
-          FRONTEND_URL: ${{ vars.FRONTEND_URL }}
-          CORS_ORIGIN: ${{ vars.CORS_ORIGIN }}
-          SENTRY_DSN_BACKEND: ${{ secrets.SENTRY_DSN_BACKEND }}
-          NODE_ENV: ${{ vars.NODE_ENV }}
+          DATABASE_URL: ${{ vars.DATABASE_URL || secrets.DATABASE_URL }}
+          JWT_ACCESS_SECRET: ${{ vars.JWT_ACCESS_SECRET || secrets.JWT_ACCESS_SECRET }}
+          JWT_REFRESH_SECRET: ${{ vars.JWT_REFRESH_SECRET || secrets.JWT_REFRESH_SECRET }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID || secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ vars.GOOGLE_CLIENT_SECRET || secrets.GOOGLE_CLIENT_SECRET }}
+          RESEND_API_KEY: ${{ vars.RESEND_API_KEY || secrets.RESEND_API_KEY }}
+          MAIL_FROM: ${{ vars.MAIL_FROM || secrets.MAIL_FROM }}
+          FRONTEND_URL: ${{ vars.FRONTEND_URL || secrets.FRONTEND_URL }}
+          CORS_ORIGIN: ${{ vars.CORS_ORIGIN || secrets.CORS_ORIGIN }}
+          SENTRY_DSN_BACKEND: ${{ vars.SENTRY_DSN_BACKEND || secrets.SENTRY_DSN_BACKEND }}
+          NODE_ENV: ${{ vars.NODE_ENV || secrets.NODE_ENV }}
+        # Explicit `shell: bash` enables pipefail, and the script writes to a
+        # file first, so a missing setting fails this step instead of
+        # shipping an empty .env.
+        shell: bash
         run: |
-          ENV_B64="$(scripts/ci/render-env.sh | base64 -w0)"
+          scripts/ci/render-env.sh > "$RUNNER_TEMP/prod.env"
+          test -s "$RUNNER_TEMP/prod.env"
+          ENV_B64="$(base64 -w0 "$RUNNER_TEMP/prod.env")"
+          rm "$RUNNER_TEMP/prod.env"
           echo "::add-mask::$ENV_B64"
           echo "ENV_B64=$ENV_B64" >> "$GITHUB_ENV"
       - uses: appleboy/ssh-action@v1
@@ -132,6 +140,12 @@ jobs:
             umask 077
             if [ -f .env ]; then cp .env .env.bak; fi
             printf '%s' "$ENV_B64" | base64 -d > .env.new
+            # Never replace a working .env with an empty or broken one.
+            if ! grep -q '^DATABASE_URL=' .env.new; then
+              echo "Rendered .env is empty or incomplete; keeping the current one" >&2
+              rm -f .env.new
+              exit 1
+            fi
             mv .env.new .env
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             ./deploy.sh "$IMAGE_TAG" || { docker logout ghcr.io; exit 1; }
