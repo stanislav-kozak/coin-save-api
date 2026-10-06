@@ -18,8 +18,10 @@ echo "==> Restarting containers"
 $COMPOSE up -d --no-build --remove-orphans
 
 echo "==> Waiting for /api/health"
+# Ask the API container directly, so the check doesn't depend on Caddy's
+# domain/TLS setup.
 for i in $(seq 1 30); do
-  if curl -fsS http://localhost/api/health >/dev/null 2>&1; then
+  if $COMPOSE exec -T api wget -qO- http://localhost:3000/api/health >/dev/null 2>&1; then
     echo "==> Healthy after $((i * 2))s"
     docker image prune -f >/dev/null
     exit 0

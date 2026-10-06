@@ -122,7 +122,8 @@ ssh-keygen -t ed25519 -f coinsave-deploy -N "" -C "github-actions-deploy"
 
 ### 4. VPS
 
-- встановлені Docker з compose-плагіном, `git` і `curl`;
+- встановлені Docker з compose-плагіном і `git`;
+- відкриті порти 80 і 443 (TCP, а 443 ще й UDP для HTTP/3);
 - користувач у групі `docker`, тобто `docker ps` працює без `sudo`;
 - репозиторій склонований у `VPS_APP_DIR`, на гілці `main`;
   `git pull` працює без пароля (deploy key або SSH-ключ на GitHub);
@@ -139,7 +140,15 @@ DNS у Cloudflare:
 | A | `dev` | `176.117.78.135` | DNS only (коли з'явиться dev-оточення) |
 
 «DNS only» потрібне, щоб Caddy сам отримав сертифікат Let's Encrypt.
-Проксі Cloudflare можна ввімкнути, коли HTTPS запрацює.
+Якщо пізніше ввімкнути проксі Cloudflare (помаранчева хмарка), обов'язково
+поставте **SSL/TLS → Full (strict)**. З режимом «Flexible» сайт піде в
+нескінченний редирект.
+
+HTTPS обслуговує Caddy (`Caddyfile`): `/api/*` і `/socket.io/*` йдуть на
+бекенд, решта — на фронтенд (поки що там заглушка 503 «coming soon»).
+Коли фронтенд житиме на цьому VPS як сервіс `web`, у `Caddyfile` треба
+замінити блок-заглушку на `reverse_proxy web:3000`. Доступ по голому IP
+перенаправляється на HTTPS і не працює, використовуйте домен.
 
 Пошта, Resend:
 
@@ -190,5 +199,7 @@ cp .env.bak .env && docker compose -f docker-compose.prod.yml up -d
 ```bash
 docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs --tail=100 api   # 5xx-помилки логуються тут
-curl -s http://localhost/api/health
+docker compose -f docker-compose.prod.yml exec -T api wget -qO- http://localhost:3000/api/health  # напряму в API
+curl -s https://app.coinsavekeeper.com/api/health                                             # через Caddy і HTTPS
+docker compose -f docker-compose.prod.yml logs --tail=50 caddy   # проблеми з сертифікатом видно тут
 ```
