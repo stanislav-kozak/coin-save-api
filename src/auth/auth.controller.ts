@@ -22,6 +22,7 @@ import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { SignupDto } from './dto/signup.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ResendVerificationDto } from './dto/resend-verification.dto';
 import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { LocalAuthGuard } from './guards/local-auth.guard';
@@ -77,6 +78,21 @@ export class AuthController {
   async verifyEmail(@Body() dto: VerifyEmailDto): Promise<{ message: string }> {
     await this.authService.verifyEmail(dto.token);
     return { message: 'Email verified' };
+  }
+
+  @Post('resend-verification')
+  @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
+  @ApiErrorResponse(HttpStatus.TOO_MANY_REQUESTS, 'HTTP_ERROR')
+  @ApiOkResponse({ type: MessageResponseDto })
+  @Throttle(THROTTLE_5_PER_MIN)
+  @HttpCode(HttpStatus.OK)
+  async resendVerification(
+    @Body() dto: ResendVerificationDto,
+  ): Promise<{ message: string }> {
+    await this.authService.resendVerification(dto.email);
+    return {
+      message: 'If the account exists and is not verified, a new link was sent',
+    };
   }
 
   @Post('login')

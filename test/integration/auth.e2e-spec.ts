@@ -153,6 +153,43 @@ describe('Auth flow (integration)', () => {
       .expect(200);
   });
 
+  it('resends a verification link that replaces the previous one', async () => {
+    const email = 'resend-test@example.com';
+    const password = 'super-secret-1';
+    const tokenFromEmail = (index: number): string | null => {
+      const sent = capturedEmails.filter((e) => e.to === email);
+      return new URL(sent[index].vars.verifyUrl).searchParams.get('token');
+    };
+
+    await request(app.getHttpServer())
+      .post('/api/auth/signup')
+      .send({ email, password })
+      .expect(201);
+    const firstToken = tokenFromEmail(0);
+
+    await request(app.getHttpServer())
+      .post('/api/auth/resend-verification')
+      .send({ email })
+      .expect(200);
+    const secondToken = tokenFromEmail(1);
+
+    await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ token: firstToken })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ token: secondToken })
+      .expect(200);
+
+    // Once verified, further resends are accepted but send nothing.
+    await request(app.getHttpServer())
+      .post('/api/auth/resend-verification')
+      .send({ email })
+      .expect(200);
+    expect(capturedEmails.filter((e) => e.to === email)).toHaveLength(2);
+  });
+
   it('rejects reuse of an already-rotated refresh token', async () => {
     const email = 'reuse-test@example.com';
     const password = 'super-secret-1';

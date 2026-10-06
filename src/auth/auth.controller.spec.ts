@@ -18,6 +18,7 @@ describe('AuthController', () => {
   let app: INestApplication;
   const authService = {
     signup: vi.fn().mockResolvedValue(undefined),
+    resendVerification: vi.fn().mockResolvedValue(undefined),
     login: vi.fn().mockResolvedValue({
       accessToken: 'access-token',
       refreshToken: 'refresh-token',
@@ -91,6 +92,25 @@ describe('AuthController', () => {
         .send({ email: 'n@b.com', password: 'password123', name })
         .expect(400);
     }
+  });
+
+  it('POST /auth/resend-verification answers 200 with a non-revealing message', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/auth/resend-verification')
+      .send({ email: 'a@b.com' })
+      .expect(200);
+
+    expect(authService.resendVerification).toHaveBeenCalledWith('a@b.com');
+    expect(res.body).toEqual({
+      message: 'If the account exists and is not verified, a new link was sent',
+    });
+  });
+
+  it('POST /auth/resend-verification rejects an invalid email with 400', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/resend-verification')
+      .send({ email: 'nope' })
+      .expect(400);
   });
 
   it('POST /auth/signup rejects an invalid email with 400', async () => {

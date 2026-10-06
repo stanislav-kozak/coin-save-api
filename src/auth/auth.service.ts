@@ -71,6 +71,20 @@ export class AuthService {
     );
   }
 
+  // Never reveals whether the email exists or is already verified.
+  async resendVerification(email: string): Promise<void> {
+    const user = await this.users.findByEmail(email);
+    if (!user || user.emailVerified) {
+      return;
+    }
+
+    // Only the newest link stays valid.
+    await this.prisma.emailVerificationToken.deleteMany({
+      where: { userId: user.id, usedAt: null },
+    });
+    await this.sendVerificationEmail(user);
+  }
+
   async verifyEmail(token: string): Promise<void> {
     const candidates = await this.prisma.emailVerificationToken.findMany({
       where: { usedAt: null, expiresAt: { gt: new Date() } },
