@@ -15,6 +15,7 @@ describe('Auth flow (integration)', () => {
   let container: StartedPostgreSqlContainer;
   let app: INestApplication;
   const capturedEmails: { to: string; vars: Record<string, string> }[] = [];
+  const failingRecipients = new Set<string>();
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:17-alpine')
@@ -46,6 +47,9 @@ describe('Auth flow (integration)', () => {
           _subject: string,
           vars: Record<string, string>,
         ): Promise<void> => {
+          if (failingRecipients.has(to)) {
+            return Promise.reject(new Error('450 domain is not verified'));
+          }
           capturedEmails.push({ to, vars });
           return Promise.resolve();
         },
@@ -188,6 +192,26 @@ describe('Auth flow (integration)', () => {
       .send({ email })
       .expect(200);
     expect(capturedEmails.filter((e) => e.to === email)).toHaveLength(2);
+  });
+
+  it('lets the user retry signup when the verification email could not be sent', async () => {
+    const email = 'mail-down@example.com';
+    const password = 'super-secret-1';
+
+    failingRecipients.add(email);
+    const failed = await request(app.getHttpServer())
+      .post('/api/auth/signup')
+      .send({ email, password })
+      .expect(503);
+    expect(failed.body.code).toBe('EMAIL_DELIVERY_FAILED');
+
+    // The half-created account was rolled back, so this is not a 409.
+    failingRecipients.delete(email);
+    await request(app.getHttpServer())
+      .post('/api/auth/signup')
+      .send({ email, password })
+      .expect(201);
+    expect(capturedEmails.some((e) => e.to === email)).toBe(true);
   });
 
   it('rejects reuse of an already-rotated refresh token', async () => {

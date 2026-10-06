@@ -40,6 +40,15 @@ describe('UsersService', () => {
     expect(publicUserSelect).not.toHaveProperty('passwordHash');
   });
 
+  it('deletes a user by id', async () => {
+    const prisma = { user: { delete: vi.fn().mockResolvedValue({}) } };
+    const service = new UsersService(prisma as never);
+
+    await service.deleteById('u1');
+
+    expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'u1' } });
+  });
+
   it('finds a user by email', async () => {
     const found = { id: 'u1', email: 'a@b.com' };
     const prisma = { user: { findUnique: vi.fn().mockResolvedValue(found) } };

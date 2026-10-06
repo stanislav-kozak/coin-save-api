@@ -124,6 +124,26 @@ describe('AppExceptionFilter', () => {
       );
     });
 
+    it('logs the underlying cause of a 5xx AppException', () => {
+      const cause = new Error('450 domain is not verified');
+
+      new AppExceptionFilter().catch(
+        new AppException(
+          ERROR_CODES.EMAIL_DELIVERY_FAILED,
+          HttpStatus.SERVICE_UNAVAILABLE,
+          'Could not send the verification email',
+          undefined,
+          { cause },
+        ),
+        createHost(() => undefined),
+      );
+
+      const [message, stack] = errorSpy.mock.calls[0] as [string, string];
+      expect(message).toContain('EMAIL_DELIVERY_FAILED');
+      expect(message).toContain('caused by: 450 domain is not verified');
+      expect(stack).toBe(cause.stack);
+    });
+
     it('does not log expected 4xx client errors', () => {
       new AppExceptionFilter().catch(
         new AppException(

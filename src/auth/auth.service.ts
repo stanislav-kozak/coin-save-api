@@ -44,7 +44,23 @@ export class AuthService {
 
     const passwordHash = await argon2.hash(password);
     const user = await this.users.createLocal(email, passwordHash, name);
-    await this.sendVerificationEmail(user);
+    try {
+      await this.sendVerificationEmail(user);
+    } catch (error) {
+      // Without the email the account can never be verified, and keeping it
+      // would make every retry fail with EMAIL_ALREADY_EXISTS. Roll it back.
+      await this.prisma.emailVerificationToken.deleteMany({
+        where: { userId: user.id },
+      });
+      await this.users.deleteById(user.id);
+      throw new AppException(
+        ERROR_CODES.EMAIL_DELIVERY_FAILED,
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'Could not send the verification email',
+        undefined,
+        { cause: error },
+      );
+    }
   }
 
   async sendVerificationEmail(user: User): Promise<void> {

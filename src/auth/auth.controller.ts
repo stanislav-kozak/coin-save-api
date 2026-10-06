@@ -56,6 +56,7 @@ export class AuthController {
   @Post('signup')
   @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
   @ApiErrorResponse(HttpStatus.CONFLICT, 'EMAIL_ALREADY_EXISTS')
+  @ApiErrorResponse(HttpStatus.SERVICE_UNAVAILABLE, 'EMAIL_DELIVERY_FAILED')
   @ApiErrorResponse(HttpStatus.TOO_MANY_REQUESTS, 'HTTP_ERROR')
   @ApiCreatedResponse({ type: MessageResponseDto })
   @Throttle(THROTTLE_5_PER_MIN)
