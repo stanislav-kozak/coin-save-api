@@ -94,6 +94,7 @@ describe('Auth flow (integration)', () => {
     const cookies = loginRes.headers['set-cookie'] as unknown as string[];
     expect(cookies.some((c) => c.startsWith('access='))).toBe(true);
     expect(cookies.some((c) => c.startsWith('refresh='))).toBe(true);
+    expect(cookies.some((c) => c.startsWith('session=1;'))).toBe(true);
 
     const meRes = await request(app.getHttpServer())
       .get('/api/auth/me')
@@ -120,10 +121,14 @@ describe('Auth flow (integration)', () => {
       'set-cookie'
     ] as unknown as string[];
 
-    await request(app.getHttpServer())
+    const logoutRes = await request(app.getHttpServer())
       .post('/api/auth/logout')
       .set('Cookie', refreshedCookies)
       .expect(200);
+    const logoutCookies = logoutRes.headers[
+      'set-cookie'
+    ] as unknown as string[];
+    expect(logoutCookies.some((c) => c.startsWith('session=;'))).toBe(true);
 
     capturedEmails.length = 0;
     await request(app.getHttpServer())
@@ -183,5 +188,9 @@ describe('Auth flow (integration)', () => {
       .expect(401);
 
     expect(res.body.code).toBe('REFRESH_TOKEN_REUSE_DETECTED');
+    // The session hint must go too, or the frontend would loop between the
+    // app and /login with a dead session.
+    const rejectedCookies = res.headers['set-cookie'] as unknown as string[];
+    expect(rejectedCookies.some((c) => c.startsWith('session=;'))).toBe(true);
   });
 });
