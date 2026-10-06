@@ -29,7 +29,10 @@ services:
       - "443:443"
       - "443:443/udp" # HTTP/3
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      # Mount the directory, not the single file: `git pull` replaces
+      # Caddyfile with a new file, and a single-file bind mount would keep
+      # showing the container the old one, so `caddy reload` saw stale config.
+      - ./caddy:/etc/caddy:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
