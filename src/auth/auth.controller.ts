@@ -60,7 +60,7 @@ export class AuthController {
   @Throttle(THROTTLE_5_PER_MIN)
   @HttpCode(HttpStatus.CREATED)
   async signup(@Body() dto: SignupDto): Promise<{ message: string }> {
-    await this.authService.signup(dto.email, dto.password);
+    await this.authService.signup(dto.email, dto.password, dto.name);
     return { message: 'Verification email sent' };
   }
 

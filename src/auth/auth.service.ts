@@ -32,7 +32,7 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {}
 
-  async signup(email: string, password: string): Promise<void> {
+  async signup(email: string, password: string, name?: string): Promise<void> {
     const existing = await this.users.findByEmail(email);
     if (existing) {
       throw new AppException(
@@ -43,7 +43,7 @@ export class AuthService {
     }
 
     const passwordHash = await argon2.hash(password);
-    const user = await this.users.createLocal(email, passwordHash);
+    const user = await this.users.createLocal(email, passwordHash, name);
     await this.sendVerificationEmail(user);
   }
 

@@ -37,8 +37,12 @@ export class UsersService {
     });
   }
 
-  createLocal(email: string, passwordHash: string): Promise<User> {
-    return this.prisma.user.create({ data: { email, passwordHash } });
+  createLocal(
+    email: string,
+    passwordHash: string,
+    name?: string,
+  ): Promise<User> {
+    return this.prisma.user.create({ data: { email, passwordHash, name } });
   }
 
   markEmailVerified(userId: string): Promise<User> {
