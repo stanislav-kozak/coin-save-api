@@ -57,6 +57,11 @@ jobs:
   docker:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Several merges in a row: a newer push cancels the older build, and with
+    # it that run's deploy, so only the latest commit is built and deployed.
+    concurrency:
+      group: build-main
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -88,7 +93,9 @@ jobs:
        (github.event_name == 'workflow_dispatch' && needs.docker.result == 'skipped'))
     runs-on: ubuntu-latest
     environment: production
-    # Never run two deploys at once; queue the newer one instead.
+    # Never run two deploys at once; queue the newer one instead. A deploy in
+    # progress is never cancelled: stopping it mid-restart could leave the
+    # site down.
     concurrency:
       group: deploy-production
       cancel-in-progress: false
@@ -97,10 +104,21 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@v4
+      # If main moved on while this run waited, the newer run deploys; skip
+      # this one instead of deploying an image that is about to be replaced.
+      - name: Skip if a newer commit is on main
+        id: latest
+        run: |
+          head="$(git ls-remote origin refs/heads/main | cut -f1)"
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "::notice::main is now at ${head:0:7}; that run deploys instead of ${GITHUB_SHA:0:7}"
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          fi
       # Settings live in the `production` environment: Secrets for credentials,
       # Variables for plain config (either works for any key).
       # Every key of .env.example must be mapped here.
       - name: Render .env from GitHub settings
+        if: steps.latest.outputs.stale != 'true'
         env:
           DATABASE_URL: ${{ vars.DATABASE_URL || secrets.DATABASE_URL }}
           JWT_ACCESS_SECRET: ${{ vars.JWT_ACCESS_SECRET || secrets.JWT_ACCESS_SECRET }}
@@ -125,6 +143,7 @@ jobs:
           echo "::add-mask::$ENV_B64"
           echo "ENV_B64=$ENV_B64" >> "$GITHUB_ENV"
       - uses: appleboy/ssh-action@v1
+        if: steps.latest.outputs.stale != 'true'
         env:
           IMAGE_TAG: ${{ github.event_name == 'push' && github.sha || 'main' }}
           GHCR_USER: ${{ github.actor }}
