@@ -101,6 +101,25 @@ describe('CategoriesService', () => {
     expect(prisma.category.update).not.toHaveBeenCalled();
   });
 
+  it('removes the monthly limit when monthlyLimit is null', async () => {
+    const { service, prisma } = buildService({
+      prisma: {
+        category: {
+          findUnique: vi
+            .fn()
+            .mockResolvedValue({ id: 'c1', spaceId: 's1', name: 'Kids' }),
+        },
+      },
+    });
+
+    await service.updateCategory('s1', 'c1', { monthlyLimit: null });
+
+    expect(prisma.category.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: expect.objectContaining({ monthlyLimit: null }) as unknown,
+    });
+  });
+
   it('deletes a category after confirming it exists in the space', async () => {
     const { service, prisma } = buildService({
       prisma: {

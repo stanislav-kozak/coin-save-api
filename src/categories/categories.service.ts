@@ -15,7 +15,7 @@ export interface UpdateCategoryInput {
   name?: string;
   icon?: string;
   color?: string;
-  monthlyLimit?: number;
+  monthlyLimit?: number | null;
 }
 
 @Injectable()

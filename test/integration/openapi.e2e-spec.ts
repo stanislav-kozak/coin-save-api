@@ -165,6 +165,20 @@ describe('OpenAPI contract (integration)', () => {
     );
   });
 
+  it('lets a category update clear the monthly limit with null', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/docs.json')
+      .expect(200);
+
+    expect(
+      res.body.components.schemas.UpdateCategoryDto.properties.monthlyLimit,
+    ).toMatchObject({ type: 'number', nullable: true });
+    expect(
+      res.body.components.schemas.CreateCategoryDto.properties.monthlyLimit
+        .nullable,
+    ).toBeUndefined();
+  });
+
   it('documents the error envelope with every API error code', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/docs.json')

@@ -21,7 +21,11 @@ export const ApiDateTimeProperty = (
 // generated clients reject valid amounts such as 0.5. Document the real rule
 // (> 0) explicitly; validation itself stays on the class-validator decorators.
 export const ApiPositiveAmountProperty = (
-  options: { required?: boolean } = {},
+  options: {
+    required?: boolean;
+    nullable?: boolean;
+    description?: string;
+  } = {},
 ): PropertyDecorator =>
   ApiProperty({
     type: Number,
@@ -30,4 +34,6 @@ export const ApiPositiveAmountProperty = (
     maximum: 1_000_000_000,
     example: 12.5,
     required: options.required ?? true,
+    ...(options.nullable ? { nullable: true } : {}),
+    ...(options.description ? { description: options.description } : {}),
   });
