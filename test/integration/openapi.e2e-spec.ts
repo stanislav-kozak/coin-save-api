@@ -146,6 +146,25 @@ describe('OpenAPI contract (integration)', () => {
     }
   });
 
+  it('documents the wallet initialBalance (required on create, optional on update)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/docs.json')
+      .expect(200);
+    const schemas = res.body.components.schemas;
+
+    for (const name of ['CreateWalletDto', 'UpdateWalletDto']) {
+      expect(schemas[name].properties.initialBalance).toMatchObject({
+        type: 'number',
+        minimum: -1_000_000_000,
+        maximum: 1_000_000_000,
+      });
+    }
+    expect(schemas.CreateWalletDto.required).toContain('initialBalance');
+    expect(schemas.UpdateWalletDto.required ?? []).not.toContain(
+      'initialBalance',
+    );
+  });
+
   it('documents the error envelope with every API error code', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/docs.json')
