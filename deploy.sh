@@ -43,7 +43,7 @@ echo "==> Restarting $SERVICE (and Caddy if needed)"
 # deploy must not move the API off a pinned rollback tag).
 $COMPOSE up -d --no-build --no-deps --remove-orphans "$SERVICE" caddy
 
-# Caddyfile is bind-mounted, so compose does not notice when it changes;
+# caddy/ is bind-mounted, so compose does not notice when Caddyfile changes;
 # reload it explicitly (a no-op when nothing changed).
 $COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null
 
