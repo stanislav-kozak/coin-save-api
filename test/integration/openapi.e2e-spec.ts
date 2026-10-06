@@ -10,7 +10,7 @@ import {
 import { AppModule } from '../../src/app.module';
 import { AppExceptionFilter } from '../../src/common/filters/app-exception.filter';
 import { MailService } from '../../src/mail/mail.service';
-import { bootstrapSwagger } from '../../src/main';
+import { bootstrapSwagger } from '../../src/swagger';
 import {
   ERROR_CODES,
   GENERIC_ERROR_CODES,

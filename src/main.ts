@@ -1,23 +1,9 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { AppExceptionFilter } from './common/filters/app-exception.filter';
-
-export function bootstrapSwagger(app: INestApplication): void {
-  const config = new DocumentBuilder()
-    .setTitle('CoinSave API')
-    .setDescription('REST API for the CoinSave family expense tracker')
-    .setVersion('1.0')
-    .addCookieAuth('access')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document, {
-    jsonDocumentUrl: 'api/docs.json',
-  });
-}
+import { bootstrapSwagger } from './swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
