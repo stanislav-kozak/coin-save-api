@@ -16,7 +16,9 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "80:80" # HTTP: Let's Encrypt challenge + redirect to HTTPS
+      - "443:443"
+      - "443:443/udp" # HTTP/3
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy-data:/data

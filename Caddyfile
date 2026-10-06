@@ -1,3 +1,24 @@
-:80 {
-  reverse_proxy api:3000
+# Production entrypoint (spec §12.7). Caddy obtains and renews the Let's
+# Encrypt certificate for this domain on its own and redirects HTTP to HTTPS.
+# Frontend and API share this single origin, which the auth cookies rely on.
+app.coinsavekeeper.com {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy api:3000
+	}
+
+	# Realtime (Socket.IO) lives on the API as well.
+	handle /socket.io/* {
+		reverse_proxy api:3000
+	}
+
+	# Everything else belongs to the frontend. Once the Next.js app runs on
+	# this VPS as the `web` service, replace this block with:
+	#   handle {
+	#   	reverse_proxy web:3000
+	#   }
+	handle {
+		respond "CoinSave is coming soon" 503
+	}
 }
