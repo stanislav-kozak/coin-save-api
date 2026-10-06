@@ -49,16 +49,17 @@ describe('UsersService', () => {
     expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: 'u1' } });
   });
 
-  it('finds a user by email', async () => {
+  it('finds a user by email regardless of letter case', async () => {
     const found = { id: 'u1', email: 'a@b.com' };
-    const prisma = { user: { findUnique: vi.fn().mockResolvedValue(found) } };
+    const prisma = { user: { findFirst: vi.fn().mockResolvedValue(found) } };
     const service = new UsersService(prisma as never);
 
-    const result = await service.findByEmail('a@b.com');
+    const result = await service.findByEmail('A@B.com');
 
     expect(result).toBe(found);
-    expect(prisma.user.findUnique).toHaveBeenCalledWith({
-      where: { email: 'a@b.com' },
+    expect(prisma.user.findFirst).toHaveBeenCalledWith({
+      where: { email: { equals: 'a@b.com', mode: 'insensitive' } },
+      orderBy: { createdAt: 'asc' },
     });
   });
 });

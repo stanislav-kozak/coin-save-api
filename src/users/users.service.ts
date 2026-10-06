@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { emailMatches } from '../common/utils/email';
 
 // Fields safe to return to the client. Never add passwordHash here.
 export const publicUserSelect = {
@@ -23,7 +24,11 @@ export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   findByEmail(email: string): Promise<User | null> {
-    return this.prisma.user.findUnique({ where: { email } });
+    // Oldest first, in case legacy rows differ only in letter case.
+    return this.prisma.user.findFirst({
+      where: { email: emailMatches(email) },
+      orderBy: { createdAt: 'asc' },
+    });
   }
 
   findById(id: string): Promise<User | null> {
