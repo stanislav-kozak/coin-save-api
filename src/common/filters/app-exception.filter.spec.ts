@@ -1,4 +1,5 @@
-import { ArgumentsHost, HttpStatus } from '@nestjs/common';
+import { ArgumentsHost, HttpStatus, Logger } from '@nestjs/common';
+import type { MockInstance } from 'vitest';
 import { AppExceptionFilter } from './app-exception.filter';
 import { AppException } from '../exceptions/app.exception';
 import { ERROR_CODES } from '../constants/error-codes';
@@ -11,6 +12,10 @@ function createHost(jsonSpy: (body: unknown) => void) {
   return {
     switchToHttp: () => ({
       getResponse: () => response,
+      getRequest: () => ({
+        method: 'POST',
+        originalUrl: '/api/auth/signup?email=secret@example.com',
+      }),
     }),
     response,
   } as unknown as ArgumentsHost & { response: typeof response };
@@ -52,6 +57,84 @@ describe('AppExceptionFilter', () => {
       statusCode: 500,
       code: 'INTERNAL_ERROR',
       message: 'Internal server error',
+    });
+  });
+
+  describe('logging', () => {
+    let errorSpy: MockInstance<Logger['error']>;
+
+    beforeEach(() => {
+      errorSpy = vi
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
+
+    it('logs an unrecognized error with method, path and stack, without the query string', () => {
+      const error = new Error('SMTP rejected the sender');
+
+      new AppExceptionFilter().catch(
+        error,
+        createHost(() => undefined),
+      );
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      const [message, stack] = errorSpy.mock.calls[0] as [string, string];
+      expect(message).toContain('POST /api/auth/signup');
+      expect(message).toContain('SMTP rejected the sender');
+      expect(message).not.toContain('secret@example.com');
+      expect(stack).toBe(error.stack);
+    });
+
+    it('masks email addresses but keeps package paths in the stack readable', () => {
+      const error = new Error(
+        '550 Recipient user.name+tag@example.co.uk rejected',
+      );
+      error.stack =
+        'Error: 550 Recipient user.name+tag@example.co.uk rejected\n' +
+        '    at send (/app/node_modules/@nestjs-modules/mailer/dist/mailer.service.js:1:1)';
+
+      new AppExceptionFilter().catch(
+        error,
+        createHost(() => undefined),
+      );
+
+      const [message, stack] = errorSpy.mock.calls[0] as [string, string];
+      expect(message).toContain('Recipient [email] rejected');
+      expect(stack).toContain('Recipient [email] rejected');
+      expect(stack).toContain('/app/node_modules/@nestjs-modules/mailer/dist');
+    });
+
+    it('logs 5xx AppExceptions with their code', () => {
+      new AppExceptionFilter().catch(
+        new AppException(
+          ERROR_CODES.CURRENCY_API_UNAVAILABLE,
+          HttpStatus.SERVICE_UNAVAILABLE,
+          'Currency API unavailable',
+        ),
+        createHost(() => undefined),
+      );
+
+      expect(errorSpy).toHaveBeenCalledTimes(1);
+      expect(String(errorSpy.mock.calls[0][0])).toContain(
+        'CURRENCY_API_UNAVAILABLE',
+      );
+    });
+
+    it('does not log expected 4xx client errors', () => {
+      new AppExceptionFilter().catch(
+        new AppException(
+          ERROR_CODES.INVALID_CREDENTIALS,
+          HttpStatus.UNAUTHORIZED,
+          'Invalid email or password',
+        ),
+        createHost(() => undefined),
+      );
+
+      expect(errorSpy).not.toHaveBeenCalled();
     });
   });
 });
