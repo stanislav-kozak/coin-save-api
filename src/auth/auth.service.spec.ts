@@ -22,6 +22,7 @@ function buildService(
       create: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      deleteMany: vi.fn(),
     },
     ...overrides.prisma,
   };
@@ -81,6 +82,63 @@ describe('AuthService', () => {
     expect(mail.send).toHaveBeenCalledWith(
       'a@b.com',
       'uk',
+      'verify-email',
+      expect.any(String),
+      expect.objectContaining({
+        verifyUrl: expect.stringContaining('/verify-email?token='),
+      }),
+    );
+  });
+
+  it('silently ignores a verification resend for an unknown email', async () => {
+    const { service, mail, prisma } = buildService({
+      users: { findByEmail: vi.fn().mockResolvedValue(null) },
+    });
+
+    await service.resendVerification('nobody@b.com');
+
+    expect(prisma.emailVerificationToken.create).not.toHaveBeenCalled();
+    expect(mail.send).not.toHaveBeenCalled();
+  });
+
+  it('silently ignores a verification resend for an already verified email', async () => {
+    const { service, mail, prisma } = buildService({
+      users: {
+        findByEmail: vi.fn().mockResolvedValue({
+          id: 'u1',
+          email: 'a@b.com',
+          emailVerified: new Date(),
+        }),
+      },
+    });
+
+    await service.resendVerification('a@b.com');
+
+    expect(prisma.emailVerificationToken.create).not.toHaveBeenCalled();
+    expect(mail.send).not.toHaveBeenCalled();
+  });
+
+  it('invalidates unused verification links and sends a fresh one to an unverified user', async () => {
+    const { service, mail, prisma } = buildService({
+      users: {
+        findByEmail: vi.fn().mockResolvedValue({
+          id: 'u1',
+          email: 'a@b.com',
+          emailVerified: null,
+          locale: 'en',
+        }),
+      },
+    });
+
+    await service.resendVerification('a@b.com');
+
+    expect(prisma.emailVerificationToken.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', usedAt: null },
+    });
+    expect(prisma.emailVerificationToken.create).toHaveBeenCalledTimes(1);
+    expect(mail.send).toHaveBeenCalledWith(
+      'a@b.com',
+      'en',
       'verify-email',
       expect.any(String),
       expect.objectContaining({
