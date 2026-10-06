@@ -303,6 +303,7 @@ describe('ExpensesService', () => {
         type: TransactionType.EXPENSE,
         from: '2026-06-01T00:00:00.000Z',
         to: '2026-06-30T00:00:00.000Z',
+        tz: 'UTC',
       });
 
       expect(prisma.expense.findMany).toHaveBeenCalledWith({
@@ -324,7 +325,7 @@ describe('ExpensesService', () => {
       const { service, prisma } = buildService();
       prisma.expense.findMany.mockResolvedValue([]);
 
-      await service.listExpenses('s1', { to: '2026-06-30' });
+      await service.listExpenses('s1', { to: '2026-06-30', tz: 'UTC' });
 
       const where = prisma.expense.findMany.mock.calls[0][0].where;
       expect(where.occurredAt.lte).toEqual(
@@ -332,6 +333,27 @@ describe('ExpensesService', () => {
       );
       expect(where.occurredAt.lte).not.toEqual(
         new Date('2026-06-30T00:00:00.000Z'),
+      );
+    });
+
+    it('reads from/to as Kyiv calendar days when no time zone is given', async () => {
+      const { service, prisma } = buildService();
+
+      await service.listExpenses('s1', {
+        from: '2026-10-01',
+        to: '2026-10-01',
+      });
+
+      const where = (
+        prisma.expense.findMany.mock.calls[0][0] as {
+          where: { occurredAt: { gte: Date; lte: Date } };
+        }
+      ).where;
+      expect(where.occurredAt.gte.toISOString()).toBe(
+        '2026-09-30T21:00:00.000Z',
+      );
+      expect(where.occurredAt.lte.toISOString()).toBe(
+        '2026-10-01T20:59:59.999Z',
       );
     });
 
