@@ -92,6 +92,13 @@ export class TokenService {
     return { userId: matched.userId, refreshToken };
   }
 
+  async revokeAllForUser(userId: string): Promise<void> {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
   async revokeRefreshToken(presentedToken: string): Promise<void> {
     const candidates = await this.prisma.refreshToken.findMany({
       where: { revokedAt: null },
