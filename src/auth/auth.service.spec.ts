@@ -287,4 +287,42 @@ describe('AuthService', () => {
       data: { usedAt: expect.any(Date) as Date },
     });
   });
+
+  it('stores the signup email trimmed and lowercased', async () => {
+    const { service, users } = buildService({
+      users: {
+        findByEmail: vi.fn().mockResolvedValue(null),
+        createLocal: vi
+          .fn()
+          .mockResolvedValue({ id: 'u1', email: 'olena@b.com', locale: 'uk' }),
+      },
+    });
+
+    await service.signup(' Olena@B.com ', 'password123');
+
+    expect(users.findByEmail).toHaveBeenCalledWith('olena@b.com');
+    expect(users.createLocal).toHaveBeenCalledWith(
+      'olena@b.com',
+      expect.any(String),
+      undefined,
+    );
+  });
+
+  it('logs in with the email in any letter case', async () => {
+    const { service, users } = buildService({
+      users: {
+        findByEmail: vi.fn().mockResolvedValue({
+          id: 'u1',
+          email: 'olena@b.com',
+          passwordHash: await argon2.hash('password123'),
+          emailVerified: new Date(),
+        }),
+      },
+    });
+
+    const user = await service.validateLocalUser('OLENA@b.com', 'password123');
+
+    expect(users.findByEmail).toHaveBeenCalledWith('olena@b.com');
+    expect(user).toEqual({ id: 'u1', email: 'olena@b.com' });
+  });
 });

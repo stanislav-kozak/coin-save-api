@@ -39,7 +39,7 @@ function buildService(
       deleteMany: vi.fn(),
     },
     category: { createMany: vi.fn() },
-    user: { findUnique: vi.fn() },
+    user: { findUnique: vi.fn(), findFirst: vi.fn() },
   };
   const prisma = buildPrismaMock(basePrisma, overrides.prisma);
   const mail = {
@@ -101,7 +101,7 @@ describe('SpacesService', () => {
     const { service } = buildService({
       prisma: {
         user: {
-          findUnique: vi
+          findFirst: vi
             .fn()
             .mockResolvedValue({ id: 'u2', email: 'existing@b.com' }),
         },
@@ -117,7 +117,7 @@ describe('SpacesService', () => {
     });
 
     try {
-      await service.inviteMember('s1', 'u1', 'existing@b.com');
+      await service.inviteMember('s1', 'u1', 'Existing@B.com');
       throw new Error('expected rejection');
     } catch (error) {
       expect((error as AppException).getStatus()).toBe(HttpStatus.CONFLICT);
@@ -166,6 +166,30 @@ describe('SpacesService', () => {
       expect((error as AppException).getStatus()).toBe(HttpStatus.FORBIDDEN);
     }
     expect(prisma.membership.delete).not.toHaveBeenCalled();
+  });
+
+  it('stores the invitee email lowercased and replaces pending invites case-insensitively', async () => {
+    const { service, prisma } = buildService({
+      prisma: {
+        user: { findFirst: vi.fn().mockResolvedValue(null) },
+        space: {
+          findUnique: vi.fn().mockResolvedValue({ id: 's1', name: 'Family' }),
+        },
+      },
+    });
+
+    await service.inviteMember('s1', 'u1', ' New.Member@B.com ');
+
+    expect(prisma.invitation.deleteMany).toHaveBeenCalledWith({
+      where: {
+        spaceId: 's1',
+        email: { equals: 'new.member@b.com', mode: 'insensitive' },
+        acceptedAt: null,
+      },
+    });
+    expect(prisma.invitation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ email: 'new.member@b.com' }) as unknown,
+    });
   });
 
   it('rejects accepting an invitation with an invalid token', async () => {

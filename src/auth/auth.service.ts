@@ -10,6 +10,7 @@ import { TokenService, type RequestMeta } from './token.service';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
+import { normalizeEmail } from '../common/utils/email';
 import { findMatchingToken } from '../common/utils/find-matching-token';
 
 const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
@@ -32,7 +33,12 @@ export class AuthService {
     private readonly config: ConfigService,
   ) {}
 
-  async signup(email: string, password: string, name?: string): Promise<void> {
+  async signup(
+    rawEmail: string,
+    password: string,
+    name?: string,
+  ): Promise<void> {
+    const email = normalizeEmail(rawEmail);
     const existing = await this.users.findByEmail(email);
     if (existing) {
       throw new AppException(
@@ -89,7 +95,7 @@ export class AuthService {
 
   // Never reveals whether the email exists or is already verified.
   async resendVerification(email: string): Promise<void> {
-    const user = await this.users.findByEmail(email);
+    const user = await this.users.findByEmail(normalizeEmail(email));
     if (!user || user.emailVerified) {
       return;
     }
@@ -126,7 +132,7 @@ export class AuthService {
     email: string,
     password: string,
   ): Promise<AuthenticatedUser> {
-    const user = await this.users.findByEmail(email);
+    const user = await this.users.findByEmail(normalizeEmail(email));
     if (!user || !user.passwordHash) {
       throw new AppException(
         ERROR_CODES.INVALID_CREDENTIALS,
@@ -172,11 +178,12 @@ export class AuthService {
       return { id: existingAccount.user.id, email: existingAccount.user.email };
     }
 
-    let user = await this.users.findByEmail(profile.email);
+    const email = normalizeEmail(profile.email);
+    let user = await this.users.findByEmail(email);
     if (!user) {
       user = await this.prisma.user.create({
         data: {
-          email: profile.email,
+          email,
           name: profile.name,
           avatarUrl: profile.avatarUrl,
           emailVerified: new Date(),
@@ -230,7 +237,7 @@ export class AuthService {
   }
 
   async requestPasswordReset(email: string): Promise<void> {
-    const user = await this.users.findByEmail(email);
+    const user = await this.users.findByEmail(normalizeEmail(email));
     if (!user) {
       return;
     }

@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
+import { emailMatches, normalizeEmail } from '../common/utils/email';
 import { findMatchingToken } from '../common/utils/find-matching-token';
 import { slugify } from '../common/utils/slugify';
 import { DEFAULT_CATEGORIES } from './constants/default-categories';
@@ -168,10 +169,11 @@ export class SpacesService {
   async inviteMember(
     spaceId: string,
     invitedById: string,
-    email: string,
+    rawEmail: string,
   ): Promise<void> {
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email },
+    const email = normalizeEmail(rawEmail);
+    const existingUser = await this.prisma.user.findFirst({
+      where: { email: emailMatches(email) },
     });
     if (existingUser) {
       const existingMembership = await this.prisma.membership.findUnique({
@@ -187,7 +189,7 @@ export class SpacesService {
     }
 
     await this.prisma.invitation.deleteMany({
-      where: { spaceId, email, acceptedAt: null },
+      where: { spaceId, email: emailMatches(email), acceptedAt: null },
     });
 
     const token = randomBytes(32).toString('hex');

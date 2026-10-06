@@ -264,6 +264,35 @@ describe('Auth flow (integration)', () => {
       .expect(401);
   });
 
+  it('treats emails case-insensitively for signup and login', async () => {
+    const password = 'super-secret-1';
+
+    await request(app.getHttpServer())
+      .post('/api/auth/signup')
+      .send({ email: 'Mixed.Case@Example.com', password })
+      .expect(201);
+    const sent = capturedEmails.find((e) => e.to === 'mixed.case@example.com');
+    expect(sent).toBeDefined();
+    await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({
+        token: new URL(sent!.vars.verifyUrl).searchParams.get('token'),
+      })
+      .expect(200);
+
+    const login = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: 'mixed.case@EXAMPLE.com', password })
+      .expect(200);
+    expect(login.body.user.email).toBe('mixed.case@example.com');
+
+    const duplicate = await request(app.getHttpServer())
+      .post('/api/auth/signup')
+      .send({ email: 'MIXED.CASE@example.COM', password })
+      .expect(409);
+    expect(duplicate.body.code).toBe('EMAIL_ALREADY_EXISTS');
+  });
+
   it('rejects reuse of an already-rotated refresh token', async () => {
     const email = 'reuse-test@example.com';
     const password = 'super-secret-1';
