@@ -12,9 +12,16 @@ env:
   IMAGE: ghcr.io/stanislav-kozak/coin-save-api
 
 jobs:
+  # Tests run once, on the pull request. The merge to main then only builds
+  # and deploys — branch protection on main (required `check`, branch up to
+  # date) guarantees the merged code is exactly what was tested.
   check:
-    if: github.event_name != 'workflow_dispatch'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # A new push to the PR cancels the now-outdated run.
+    concurrency:
+      group: check-${{ github.head_ref }}
+      cancel-in-progress: true
     env:
       # prisma.config.ts reads DATABASE_URL at generate time; no DB is needed.
       DATABASE_URL: postgresql://user:password@localhost:5432/db
@@ -48,7 +55,6 @@ jobs:
       - run: npm run build
 
   docker:
-    needs: check
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
