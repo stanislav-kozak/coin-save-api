@@ -5,13 +5,14 @@
 
 ## Як це працює
 
-Кожен мерж у `main` автоматично деплоїться на VPS (`.github/workflows/ci-cd.yml`):
+Workflow `.github/workflows/ci-cd.yml` працює так: тести один раз на PR,
+а після мержу в `main` образ і деплой.
 
-1. **check**: lint, prettier, typecheck, unit-тести, інтеграційні тести
-   (Postgres піднімається в CI через testcontainers), `npm run build`.
-   Цей крок запускається й на кожному PR у `main`. Якщо він червоний,
-   далі нічого не відбувається.
-2. **docker** (лише після мержу): збирає образ і пушить у GHCR як
+1. **check** (лише на PR у `main`): lint, prettier, typecheck, unit-тести,
+   інтеграційні тести (Postgres піднімається в CI через testcontainers),
+   `npm run build`. Новий пуш у PR скасовує попередню перевірку.
+   Мерж можливий лише із зеленим `check` (див. «Захист гілки main»).
+2. **docker** (після мержу в `main`): збирає образ і пушить у GHCR як
    `ghcr.io/stanislav-kozak/coin-save-api:main` і `:<sha коміту>`.
 3. **deploy**:
    - збирає `.env` з налаштувань GitHub (див. нижче);
@@ -108,7 +109,18 @@ ssh-keygen -t ed25519 -f coinsave-deploy -N "" -C "github-actions-deploy"
 За бажанням: Environment `production` → **Required reviewers**. Тоді кожен
 деплой чекатиме вашого підтвердження.
 
-### 3. VPS
+### 3. Захист гілки main (обов'язково)
+
+Після мержу тести вдруге не запускаються, тож у `main` має потрапляти
+лише перевірений код. GitHub → **Settings → Branches → Add branch ruleset**
+(або **Add rule**) для `main`:
+
+- **Require a pull request before merging**, тобто без прямих пушів у `main`;
+- **Require status checks to pass** → додати `check`;
+- **Require branches to be up to date before merging**: PR перевіряється
+  разом з актуальним `main`, тож змерджиться рівно те, що пройшло тести.
+
+### 4. VPS
 
 - встановлені Docker з compose-плагіном, `git` і `curl`;
 - користувач у групі `docker`, тобто `docker ps` працює без `sudo`;
