@@ -10,6 +10,7 @@ import {
 import { AppModule } from '../../src/app.module';
 import { AppExceptionFilter } from '../../src/common/filters/app-exception.filter';
 import { MailService } from '../../src/mail/mail.service';
+import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 
 describe('Auth flow (integration)', () => {
   let container: StartedPostgreSqlContainer;
@@ -65,6 +66,12 @@ describe('Auth flow (integration)', () => {
     app.useGlobalFilters(new AppExceptionFilter());
     await app.init();
   }, 60_000);
+
+  // Each test is its own scenario: don't let earlier tests' signups/logins
+  // count against the per-IP auth rate limits (covered in rate-limit.e2e-spec).
+  beforeEach(() => {
+    app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
+  });
 
   afterAll(async () => {
     await app.close();
@@ -212,6 +219,49 @@ describe('Auth flow (integration)', () => {
       .send({ email, password })
       .expect(201);
     expect(capturedEmails.some((e) => e.to === email)).toBe(true);
+  });
+
+  it('ends existing sessions when the password is reset', async () => {
+    const email = 'reset-revokes@example.com';
+    const password = 'super-secret-1';
+
+    await request(app.getHttpServer())
+      .post('/api/auth/signup')
+      .send({ email, password })
+      .expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+
+    // A session on another device, e.g. a stolen one.
+    const otherDevice = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email, password })
+      .expect(200);
+    const otherCookies = otherDevice.headers[
+      'set-cookie'
+    ] as unknown as string[];
+
+    await request(app.getHttpServer())
+      .post('/api/auth/request-password-reset')
+      .send({ email })
+      .expect(200);
+    const resetToken = new URL(
+      capturedEmails.filter((e) => e.to === email).at(-1)!.vars.resetUrl,
+    ).searchParams.get('token');
+    await request(app.getHttpServer())
+      .post('/api/auth/reset-password')
+      .send({ token: resetToken, newPassword: 'brand-new-secret-1' })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/api/auth/refresh')
+      .set('Cookie', otherCookies)
+      .expect(401);
   });
 
   it('rejects reuse of an already-rotated refresh token', async () => {

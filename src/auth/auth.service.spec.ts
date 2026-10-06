@@ -14,6 +14,7 @@ function buildService(
 ) {
   const users = {
     findByEmail: vi.fn(),
+    updatePassword: vi.fn(),
     createLocal: vi.fn(),
     deleteById: vi.fn(),
     ...overrides.users,
@@ -25,6 +26,11 @@ function buildService(
       update: vi.fn(),
       deleteMany: vi.fn(),
     },
+    passwordResetToken: {
+      findMany: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+    },
     ...overrides.prisma,
   };
   const mail = { send: vi.fn(), ...overrides.mail };
@@ -33,6 +39,7 @@ function buildService(
     issueRefreshToken: vi.fn(),
     rotateRefreshToken: vi.fn(),
     revokeRefreshToken: vi.fn(),
+    revokeAllForUser: vi.fn(),
     ...overrides.tokens,
   };
   const config = {
@@ -257,5 +264,27 @@ describe('AuthService', () => {
         verifyUrl: expect.stringContaining('/verify-email?token='),
       }),
     );
+  });
+
+  it('signs the user out everywhere and voids other reset links after a password reset', async () => {
+    const rawToken = 'r'.repeat(64);
+    const matched = {
+      id: 'prt1',
+      userId: 'u1',
+      tokenHash: await argon2.hash(rawToken),
+      usedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+    };
+    const { service, prisma, users, tokens } = buildService();
+    prisma.passwordResetToken.findMany.mockResolvedValue([matched]);
+
+    await service.resetPassword(rawToken, 'new-password-1');
+
+    expect(users.updatePassword).toHaveBeenCalledWith('u1', expect.any(String));
+    expect(tokens.revokeAllForUser).toHaveBeenCalledWith('u1');
+    expect(prisma.passwordResetToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', usedAt: null },
+      data: { usedAt: expect.any(Date) as Date },
+    });
   });
 });

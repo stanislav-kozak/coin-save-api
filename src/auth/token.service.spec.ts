@@ -68,4 +68,20 @@ describe('TokenService', () => {
       data: { revokedAt: expect.any(Date) },
     });
   });
+
+  it('revokes every active refresh token of a user', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 3 });
+    const prisma = { refreshToken: { updateMany } };
+    const service = new TokenService(
+      { sign: vi.fn() } as never,
+      prisma as never,
+    );
+
+    await service.revokeAllForUser('u1');
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', revokedAt: null },
+      data: { revokedAt: expect.any(Date) as Date },
+    });
+  });
 });
