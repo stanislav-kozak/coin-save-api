@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsNumber,
   IsOptional,
@@ -27,6 +28,15 @@ export class UpdateWalletDto {
   })
   color?: string;
 
+  // Explicit: the swagger plugin silently drops properties whose validators
+  // take a negative literal (@Min(-1_000_000_000)).
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: -1_000_000_000,
+    maximum: 1_000_000_000,
+    example: 1250.5,
+    description: 'Up to 4 decimal places; may be negative (e.g. a credit card)',
+  })
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 4 })
   @Min(-1_000_000_000)

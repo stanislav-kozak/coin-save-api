@@ -53,6 +53,8 @@ jobs:
       # Integration tests start their own Postgres via testcontainers.
       - run: npm run test:e2e
       - run: npm run build
+      - name: OpenAPI documents every DTO property
+        run: node scripts/ci/check-openapi-dtos.js
 
   docker:
     if: github.event_name == 'push'
