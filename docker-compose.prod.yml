@@ -1,5 +1,8 @@
 services:
   api:
+    # CI pushes this image to GHCR and deploy.sh pulls it; `build` stays for
+    # building locally with `npm run docker:prod:up`.
+    image: ghcr.io/stanislav-kozak/coin-save-api:${API_IMAGE_TAG:-main}
     build:
       context: .
       dockerfile: Dockerfile
