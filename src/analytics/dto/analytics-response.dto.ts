@@ -105,6 +105,12 @@ export class AnalyticsResponseDto {
   @ApiProperty({ type: AnalyticsPeriodDto })
   period!: AnalyticsPeriodDto;
 
+  @ApiProperty({
+    example: 'Europe/Kyiv',
+    description: 'Time zone the period and byDay dates were computed in',
+  })
+  timeZone!: string;
+
   @ApiDecimalProperty()
   totalExpense!: string;
 

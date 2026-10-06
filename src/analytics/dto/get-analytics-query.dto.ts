@@ -1,5 +1,6 @@
 import { Transform } from 'class-transformer';
 import { IsArray, IsISO8601, IsOptional, IsString } from 'class-validator';
+import { TimeZoneQuery } from '../../common/decorators/time-zone-query.decorator';
 
 export class GetAnalyticsQueryDto {
   @IsISO8601()
@@ -20,4 +21,7 @@ export class GetAnalyticsQueryDto {
   @IsArray()
   @IsString({ each: true })
   walletIds?: string[];
+
+  @TimeZoneQuery()
+  tz?: string;
 }

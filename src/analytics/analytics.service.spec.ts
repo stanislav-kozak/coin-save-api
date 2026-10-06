@@ -81,6 +81,7 @@ describe('AnalyticsService', () => {
       const result = await service.getAnalytics('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(result.totalExpense.toNumber()).toBe(150);
@@ -106,6 +107,7 @@ describe('AnalyticsService', () => {
       await service.getAnalytics('s1', {
         from: '2026-06-01',
         to: '2026-06-10',
+        tz: 'UTC',
       });
 
       expect(prisma.expense.groupBy).toHaveBeenCalledWith(
@@ -138,6 +140,7 @@ describe('AnalyticsService', () => {
       const result = await service.getAnalytics('s1', {
         from: '2026-06-01',
         to: '2026-06-10',
+        tz: 'UTC',
       });
 
       // The groupBy `gte` bound must be exactly UTC midnight on 2026-05-22 so
@@ -177,6 +180,7 @@ describe('AnalyticsService', () => {
       const result = await service.getAnalytics('s1', {
         from: '2026-06-01',
         to: '2026-06-10',
+        tz: 'UTC',
       });
 
       expect(result.previousPeriodExpense.toNumber()).toBe(80);
@@ -189,6 +193,7 @@ describe('AnalyticsService', () => {
       await service.getAnalytics('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(prisma.category.findMany).toHaveBeenCalledWith(
@@ -223,6 +228,7 @@ describe('AnalyticsService', () => {
       const result = await service.getAnalytics('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(result.byCategory.map((c) => c.categoryId)).toEqual([
@@ -276,6 +282,7 @@ describe('AnalyticsService', () => {
       const result = await service.getAnalytics('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(result.byCategory).toHaveLength(3);
@@ -318,6 +325,7 @@ describe('AnalyticsService', () => {
       const result = await service.getAnalytics('s1', {
         from: '2026-06-01',
         to: '2026-06-03',
+        tz: 'UTC',
       });
 
       expect(result.byDay).toEqual([
@@ -364,6 +372,7 @@ describe('AnalyticsService', () => {
       const result = await service.getAnalytics('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(result.expenses).toHaveLength(1);
@@ -382,6 +391,7 @@ describe('AnalyticsService', () => {
       await service.getAnalytics('s1', {
         from: '2026-06-01',
         to: '2026-06-10',
+        tz: 'UTC',
         walletIds: ['w1', 'w2'],
       });
 
@@ -404,6 +414,7 @@ describe('AnalyticsService', () => {
         await service.getAnalytics('s1', {
           from: '2026-06-10',
           to: '2026-06-01',
+          tz: 'UTC',
         });
         throw new Error('expected rejection');
       } catch (error) {
@@ -423,6 +434,7 @@ describe('AnalyticsService', () => {
         await service.getAnalytics('s1', {
           from: 'not-a-date',
           to: '2026-06-10',
+          tz: 'UTC',
         });
         throw new Error('expected rejection');
       } catch (error) {
@@ -444,11 +456,87 @@ describe('AnalyticsService', () => {
         await service.getAnalytics('missing', {
           from: '2026-06-01',
           to: '2026-06-10',
+          tz: 'UTC',
         });
         throw new Error('expected rejection');
       } catch (error) {
         expect((error as AppException).getStatus()).toBe(HttpStatus.NOT_FOUND);
       }
+    });
+  });
+
+  describe('time zones', () => {
+    it('uses Kyiv day boundaries by default, so 30.09 18:00 Kyiv stays in September', async () => {
+      const findMany = vi.fn().mockResolvedValue([
+        expenseRow({
+          id: 'oct1-0130-kyiv',
+          type: TransactionType.EXPENSE,
+          occurredAt: new Date('2026-09-30T22:30:00.000Z'), // 01.10 01:30 Kyiv
+          amountInPrimary: new Prisma.Decimal(50),
+        }),
+      ]);
+      const { service } = buildService({ prisma: { expense: { findMany } } });
+
+      const result = await service.getAnalytics('s1', {
+        from: '2026-10-01',
+        to: '2026-10-31',
+      });
+
+      expect(result.timeZone).toBe('Europe/Kyiv');
+      const currentQuery = findMany.mock.calls[0][0] as {
+        where: { occurredAt: { gte: Date; lte: Date } };
+      };
+      // 01.10 00:00 Kyiv (UTC+3) .. 31.10 23:59:59.999 Kyiv (UTC+2 after DST ends)
+      expect(currentQuery.where.occurredAt.gte.toISOString()).toBe(
+        '2026-09-30T21:00:00.000Z',
+      );
+      expect(currentQuery.where.occurredAt.lte.toISOString()).toBe(
+        '2026-10-31T21:59:59.999Z',
+      );
+      expect(result.byDay).toHaveLength(31);
+      expect(result.byDay[0].date).toBe('2026-10-01');
+      expect(result.byDay[0].expense.toNumber()).toBe(50);
+    });
+
+    it('uses the time zone the client sends', async () => {
+      const findMany = vi.fn().mockResolvedValue([]);
+      const { service } = buildService({ prisma: { expense: { findMany } } });
+
+      const result = await service.getAnalytics('s1', {
+        from: '2026-06-01',
+        to: '2026-06-01',
+        tz: 'America/New_York',
+      });
+
+      expect(result.timeZone).toBe('America/New_York');
+      const currentQuery = findMany.mock.calls[0][0] as {
+        where: { occurredAt: { gte: Date; lte: Date } };
+      };
+      expect(currentQuery.where.occurredAt.gte.toISOString()).toBe(
+        '2026-06-01T04:00:00.000Z',
+      );
+    });
+
+    it('dates CSV rows in the requested time zone', async () => {
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi.fn().mockResolvedValue([
+              expenseRow({
+                id: 'e1',
+                occurredAt: new Date('2026-09-30T22:30:00.000Z'),
+              }),
+            ]),
+          },
+        },
+      });
+
+      const csv = await service.exportExpensesCsv('s1', {
+        from: '2026-10-01',
+        to: '2026-10-31',
+      });
+
+      expect(csv.split('\r\n')[1].startsWith('2026-10-01,')).toBe(true);
     });
   });
 
@@ -474,6 +562,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       const lines = csv.split('\r\n');
@@ -498,6 +587,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(csv.charCodeAt(0)).toBe(0xfeff);
@@ -528,6 +618,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       const lines = csv.replace(/^\ufeff/, '').split('\r\n');
@@ -552,6 +643,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(csv).toContain('"\'=HYPERLINK(""http://evil"")"');
@@ -574,6 +666,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       const lines = csv.replace(/^\ufeff/, '').split('\r\n');
@@ -596,6 +689,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(csv.split('\r\n')[1]).toContain(',Uncategorized,');
@@ -618,6 +712,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(csv.split('\r\n')[1]).toContain('anon@example.com');
@@ -639,6 +734,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(csv.split('\r\n')[1]).toContain('"Milk, eggs, bread"');
@@ -660,6 +756,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(csv.split('\r\n')[1]).toContain('"She said ""hi"""');
@@ -681,6 +778,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(csv).toContain('"Line one\nLine two"');
@@ -700,6 +798,7 @@ describe('AnalyticsService', () => {
       const csv = await service.exportExpensesCsv('s1', {
         from: '2026-06-01',
         to: '2026-06-30',
+        tz: 'UTC',
       });
 
       expect(csv.split('\r\n')[1]).toContain(',,Olena');
@@ -712,6 +811,7 @@ describe('AnalyticsService', () => {
         await service.exportExpensesCsv('s1', {
           from: '2026-06-10',
           to: '2026-06-01',
+          tz: 'UTC',
         });
         throw new Error('expected rejection');
       } catch (error) {

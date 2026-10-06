@@ -290,4 +290,93 @@ describe('Analytics flow (integration)', () => {
     expect(rentRow).toContain(',EXPENSE,');
     expect(csvLines.some((line) => line.includes('999'))).toBe(false);
   });
+
+  it('reads the period in the client time zone (Kyiv by default), not UTC', async () => {
+    const agent = createCookieAgent(app);
+    const email = 'kyiv@example.com';
+    const password = 'super-secret-1';
+
+    await agent.post('/api/auth/signup').send({ email, password }).expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await agent
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+    const loginRes = await agent
+      .post('/api/auth/login')
+      .send({ email, password })
+      .expect(200);
+    const userId = loginRes.body.user.id as string;
+    const spaceId = (
+      await agent.post('/api/spaces').send({ name: 'Kyiv' }).expect(201)
+    ).body.id as string;
+    const walletId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/wallets`)
+        .send({ name: 'Card', currency: 'EUR', initialBalance: 0 })
+        .expect(201)
+    ).body.id as string;
+
+    const expense = (amount: number, occurredAt: string) =>
+      prisma.expense.create({
+        data: {
+          spaceId,
+          walletId,
+          type: TransactionType.EXPENSE,
+          amount,
+          walletCurrency: 'EUR',
+          amountInPrimary: amount,
+          fxRate: 1,
+          occurredAt: new Date(occurredAt),
+          createdById: userId,
+        },
+      });
+    await expense(2000, '2026-09-30T15:00:00.000Z'); // 30.09 18:00 Kyiv
+    await expense(30, '2026-09-30T22:00:00.000Z'); // 01.10 01:00 Kyiv
+
+    const october = await agent
+      .get(`/api/spaces/${spaceId}/analytics?from=2026-10-01&to=2026-10-31`)
+      .expect(200);
+    expect(Number(october.body.totalExpense)).toBe(30);
+    expect(october.body.timeZone).toBe('Europe/Kyiv');
+    expect(Number(october.body.previousPeriodExpense)).toBe(2000);
+    expect(october.body.byDay[0]).toMatchObject({ date: '2026-10-01' });
+    expect(Number(october.body.byDay[0].expense)).toBe(30);
+
+    // The old frontend sent the month start as a Kyiv-midnight timestamp;
+    // that must mean the same Kyiv day, not "30.09 UTC" (which pulled the
+    // 2000 into October).
+    const octoberAsTimestamps = await agent
+      .get(`/api/spaces/${spaceId}/analytics`)
+      .query({
+        from: '2026-09-30T21:00:00.000Z',
+        to: '2026-10-31T21:59:59.999Z',
+      })
+      .expect(200);
+    expect(Number(octoberAsTimestamps.body.totalExpense)).toBe(30);
+
+    // The same request with tz=UTC puts both into September.
+    const octoberUtc = await agent
+      .get(
+        `/api/spaces/${spaceId}/analytics?from=2026-10-01&to=2026-10-31&tz=UTC`,
+      )
+      .expect(200);
+    expect(Number(octoberUtc.body.totalExpense)).toBe(0);
+
+    const csv = await agent
+      .get(`/api/spaces/${spaceId}/expenses.csv?from=2026-10-01&to=2026-10-31`)
+      .expect(200);
+    const rows = csv.text.split('\r\n').slice(1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].startsWith('2026-10-01,')).toBe(true);
+
+    const invalid = await agent
+      .get(
+        `/api/spaces/${spaceId}/analytics?from=2026-10-01&to=2026-10-31&tz=Mars/Base`,
+      )
+      .expect(400);
+    expect(invalid.body.code).toBe('VALIDATION_ERROR');
+  });
 });

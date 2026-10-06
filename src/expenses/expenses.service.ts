@@ -2,6 +2,12 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { Prisma, type Expense, type TransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrencyService } from '../currencies/currencies.service';
+import {
+  DEFAULT_TIME_ZONE,
+  endOfZonedDay,
+  startOfZonedDay,
+  toCalendarDate,
+} from '../common/utils/time-zone';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 
@@ -22,6 +28,7 @@ export interface ListExpensesFilter {
   type?: TransactionType;
   from?: string;
   to?: string;
+  tz?: string;
 }
 
 export interface UpdateExpenseInput {
@@ -81,11 +88,27 @@ export class ExpensesService {
     spaceId: string,
     filter: ListExpensesFilter,
   ): Promise<Expense[]> {
+    // from/to are calendar days in the caller's time zone, both inclusive.
+    const timeZone = filter.tz ?? DEFAULT_TIME_ZONE;
     const occurredAtRange =
       filter.from || filter.to
         ? {
-            ...(filter.from ? { gte: new Date(filter.from) } : {}),
-            ...(filter.to ? { lte: this.endOfUtcDay(filter.to) } : {}),
+            ...(filter.from
+              ? {
+                  gte: startOfZonedDay(
+                    toCalendarDate(filter.from, timeZone),
+                    timeZone,
+                  ),
+                }
+              : {}),
+            ...(filter.to
+              ? {
+                  lte: endOfZonedDay(
+                    toCalendarDate(filter.to, timeZone),
+                    timeZone,
+                  ),
+                }
+              : {}),
           }
         : undefined;
 
@@ -196,21 +219,6 @@ export class ExpensesService {
       );
     }
     return date;
-  }
-
-  private endOfUtcDay(isoString: string): Date {
-    const date = new Date(isoString);
-    return new Date(
-      Date.UTC(
-        date.getUTCFullYear(),
-        date.getUTCMonth(),
-        date.getUTCDate(),
-        23,
-        59,
-        59,
-        999,
-      ),
-    );
   }
 
   private async assertWalletInSpace(

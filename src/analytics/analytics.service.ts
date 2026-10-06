@@ -1,6 +1,15 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { Prisma, TransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  addDays,
+  countDaysInclusive,
+  DEFAULT_TIME_ZONE,
+  endOfZonedDay,
+  startOfZonedDay,
+  toCalendarDate,
+  toZonedDate,
+} from '../common/utils/time-zone';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 
@@ -20,6 +29,15 @@ export interface GetAnalyticsFilter {
   from: string;
   to: string;
   walletIds?: string[];
+  tz?: string;
+}
+
+interface Period {
+  timeZone: string;
+  fromDate: string;
+  toDate: string;
+  fromStart: Date;
+  toEnd: Date;
 }
 
 export interface AnalyticsExpenseItem {
@@ -58,6 +76,7 @@ export interface AnalyticsByDay {
 export interface AnalyticsResponse {
   currency: string;
   period: { from: string; to: string };
+  timeZone: string;
   totalExpense: Prisma.Decimal;
   totalIncome: Prisma.Decimal;
   previousPeriodExpense: Prisma.Decimal;
@@ -75,7 +94,8 @@ export class AnalyticsService {
     spaceId: string,
     filter: GetAnalyticsFilter,
   ): Promise<AnalyticsResponse> {
-    const { fromStart, toEnd } = this.parsePeriod(filter.from, filter.to);
+    const period = this.parsePeriod(filter.from, filter.to, filter.tz);
+    const { fromStart, toEnd } = period;
     const space = await this.findSpaceOrThrow(spaceId);
     const walletFilter: Prisma.ExpenseWhereInput = filter.walletIds?.length
       ? { walletId: { in: filter.walletIds } }
@@ -96,28 +116,33 @@ export class AnalyticsService {
           include: expenseWithJoinsInclude,
           orderBy: { occurredAt: 'asc' },
         }),
-        this.getPreviousPeriodSums(spaceId, walletFilter, fromStart, toEnd),
+        this.getPreviousPeriodSums(spaceId, walletFilter, period),
       ],
     );
 
     return {
       currency: space.primaryCurrency,
       period: { from: filter.from, to: filter.to },
+      timeZone: period.timeZone,
       totalExpense: this.sumByType(currentExpenses, TransactionType.EXPENSE),
       totalIncome: this.sumByType(currentExpenses, TransactionType.INCOME),
       previousPeriodExpense: previousPeriodSums.expense,
       previousPeriodIncome: previousPeriodSums.income,
       byCategory: this.buildByCategory(categories, currentExpenses),
-      byDay: this.buildByDay(currentExpenses, fromStart, toEnd),
+      byDay: this.buildByDay(currentExpenses, period),
       expenses: currentExpenses.map((expense) => this.toExpenseItem(expense)),
     };
   }
 
   async exportExpensesCsv(
     spaceId: string,
-    filter: { from: string; to: string },
+    filter: { from: string; to: string; tz?: string },
   ): Promise<string> {
-    const { fromStart, toEnd } = this.parsePeriod(filter.from, filter.to);
+    const { fromStart, toEnd, timeZone } = this.parsePeriod(
+      filter.from,
+      filter.to,
+      filter.tz,
+    );
     const space = await this.findSpaceOrThrow(spaceId);
 
     const expenses = await this.prisma.expense.findMany({
@@ -141,7 +166,7 @@ export class AnalyticsService {
     const rows = expenses.map((expense) => {
       const item = this.toExpenseItem(expense);
       return [
-        item.occurredAt.toISOString().slice(0, 10),
+        toZonedDate(item.occurredAt, timeZone),
         item.type,
         item.walletName,
         item.categoryName,
@@ -170,19 +195,24 @@ export class AnalyticsService {
     return neutralized;
   }
 
-  protected startOfUtcDay(isoString: string): Date {
-    const date = new Date(isoString);
-    return new Date(
-      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
-    );
-  }
-
-  protected parsePeriod(
-    from: string,
-    to: string,
-  ): { fromStart: Date; toEnd: Date } {
-    const fromStart = this.startOfUtcDay(from);
-    const toEnd = this.endOfUtcDay(to);
+  // from/to are calendar days in the caller's time zone (default Kyiv):
+  // the period runs from the start of `from` to the end of `to` there.
+  protected parsePeriod(from: string, to: string, tz?: string): Period {
+    const timeZone = tz ?? DEFAULT_TIME_ZONE;
+    let fromDate: string;
+    let toDate: string;
+    try {
+      fromDate = toCalendarDate(from, timeZone);
+      toDate = toCalendarDate(to, timeZone);
+    } catch {
+      throw new AppException(
+        ERROR_CODES.INVALID_PERIOD,
+        HttpStatus.BAD_REQUEST,
+        'from/to must be valid dates',
+      );
+    }
+    const fromStart = startOfZonedDay(fromDate, timeZone);
+    const toEnd = endOfZonedDay(toDate, timeZone);
     if (Number.isNaN(fromStart.getTime()) || Number.isNaN(toEnd.getTime())) {
       throw new AppException(
         ERROR_CODES.INVALID_PERIOD,
@@ -197,23 +227,22 @@ export class AnalyticsService {
         'from must not be after to',
       );
     }
-    return { fromStart, toEnd };
+    return { timeZone, fromDate, toDate, fromStart, toEnd };
   }
 
   private async getPreviousPeriodSums(
     spaceId: string,
     walletFilter: Prisma.ExpenseWhereInput,
-    fromStart: Date,
-    toEnd: Date,
+    period: Period,
   ): Promise<{ expense: Prisma.Decimal; income: Prisma.Decimal }> {
-    const MS_PER_DAY = 24 * 60 * 60 * 1000;
-    const periodDays = Math.round(
-      (toEnd.getTime() - fromStart.getTime() + 1) / MS_PER_DAY,
+    // The same number of calendar days right before the period, counted in
+    // the period's time zone (a DST day is 23h or 25h, not 24h).
+    const periodDays = countDaysInclusive(period.fromDate, period.toDate);
+    const previousFrom = startOfZonedDay(
+      addDays(period.fromDate, -periodDays),
+      period.timeZone,
     );
-    const previousFrom = new Date(
-      fromStart.getTime() - periodDays * MS_PER_DAY,
-    );
-    const previousToExclusive = fromStart;
+    const previousToExclusive = period.fromStart;
 
     const grouped = await this.prisma.expense.groupBy({
       by: ['type'],
@@ -294,15 +323,14 @@ export class AnalyticsService {
 
   private buildByDay(
     expenses: ExpenseWithJoins[],
-    fromStart: Date,
-    toEnd: Date,
+    period: Period,
   ): AnalyticsByDay[] {
     const sumsByDate = new Map<
       string,
       { expense: Prisma.Decimal; income: Prisma.Decimal }
     >();
     for (const expense of expenses) {
-      const dateKey = expense.occurredAt.toISOString().slice(0, 10);
+      const dateKey = toZonedDate(expense.occurredAt, period.timeZone);
       const current = sumsByDate.get(dateKey) ?? {
         expense: new Prisma.Decimal(0),
         income: new Prisma.Decimal(0),
@@ -316,24 +344,16 @@ export class AnalyticsService {
     }
 
     const days: AnalyticsByDay[] = [];
-    const cursor = new Date(
-      Date.UTC(
-        fromStart.getUTCFullYear(),
-        fromStart.getUTCMonth(),
-        fromStart.getUTCDate(),
-      ),
-    );
-    const lastDay = new Date(
-      Date.UTC(toEnd.getUTCFullYear(), toEnd.getUTCMonth(), toEnd.getUTCDate()),
-    );
-    while (cursor.getTime() <= lastDay.getTime()) {
-      const dateKey = cursor.toISOString().slice(0, 10);
+    for (
+      let dateKey = period.fromDate;
+      dateKey <= period.toDate;
+      dateKey = addDays(dateKey, 1)
+    ) {
       const sums = sumsByDate.get(dateKey) ?? {
         expense: new Prisma.Decimal(0),
         income: new Prisma.Decimal(0),
       };
       days.push({ date: dateKey, expense: sums.expense, income: sums.income });
-      cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
     return days;
   }
@@ -367,21 +387,6 @@ export class AnalyticsService {
       createdById: expense.createdById,
       createdByName: expense.createdBy.name ?? expense.createdBy.email,
     };
-  }
-
-  protected endOfUtcDay(isoString: string): Date {
-    const date = new Date(isoString);
-    return new Date(
-      Date.UTC(
-        date.getUTCFullYear(),
-        date.getUTCMonth(),
-        date.getUTCDate(),
-        23,
-        59,
-        59,
-        999,
-      ),
-    );
   }
 
   protected async findSpaceOrThrow(
