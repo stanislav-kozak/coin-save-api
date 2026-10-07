@@ -172,6 +172,17 @@ describe('Expenses flow (integration)', () => {
       2,
     );
 
+    // null clears the category («Без категорії») and the note; absent fields
+    // stay as they are.
+    expect(noteUpdateRes.body.categoryId).toBe(categoryId);
+    const clearedRes = await agent
+      .patch(`/api/spaces/${spaceId}/expenses/${expenseId}`)
+      .send({ categoryId: null, note: null })
+      .expect(200);
+    expect(clearedRes.body.categoryId).toBeNull();
+    expect(clearedRes.body.note).toBeNull();
+    expect(Number(clearedRes.body.amount)).toBe(100);
+
     const amountUpdateRes = await agent
       .patch(`/api/spaces/${spaceId}/expenses/${expenseId}`)
       .send({ amount: 200 })
