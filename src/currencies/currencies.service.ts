@@ -17,6 +17,8 @@ const SECONDARY_JSDELIVR_BASE =
   'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api';
 const SECONDARY_CLOUDFLARE_HOST_SUFFIX = 'currency-api.pages.dev';
 const REFERENCE_CURRENCY = 'EUR';
+// Uncached days fetched in parallel by getRates (keeps providers happy).
+const RATE_FETCH_CONCURRENCY = 6;
 
 interface FrankfurterResponse {
   rates: Record<string, number>;
@@ -47,18 +49,77 @@ export class CurrencyService {
     return amount.times(rate);
   }
 
-  async getRate(from: string, to: string, date: Date): Promise<Prisma.Decimal> {
-    const unsupported = [from, to].filter(
-      (currency) =>
-        !(SUPPORTED_CURRENCIES as readonly string[]).includes(currency),
-    );
-    if (unsupported.length > 0) {
-      throw new AppException(
-        ERROR_CODES.CURRENCY_NOT_SUPPORTED,
-        HttpStatus.BAD_REQUEST,
-        `Unsupported currency code(s): ${unsupported.join(', ')}`,
+  /**
+   * Batch version of getRate for many (from, to, date) lookups, in request
+   * order. Every rate already cached is read with a single query; only
+   * lookups whose day isn't cached go through getRate (which fetches and
+   * caches that day) — in parallel across days, one day at a time each, so
+   * the same day is never fetched and upserted twice concurrently.
+   */
+  async getRates(
+    requests: { from: string; to: string; date: Date }[],
+  ): Promise<Prisma.Decimal[]> {
+    this.assertSupported(requests.flatMap((r) => [r.from, r.to]));
+
+    const dayOf = requests.map((r) => this.toKyivDateString(r.date));
+    const currencies = [
+      ...new Set(requests.flatMap((r) => [r.from, r.to])),
+    ].filter((c) => c !== REFERENCE_CURRENCY);
+    const days = [...new Set(dayOf)];
+
+    const cached = new Map<string, Prisma.Decimal>();
+    if (currencies.length > 0 && days.length > 0) {
+      const rows = await this.prisma.exchangeRate.findMany({
+        where: {
+          fromCurrency: REFERENCE_CURRENCY,
+          toCurrency: { in: currencies },
+          date: { in: days.map((d) => new Date(`${d}T00:00:00.000Z`)) },
+        },
+      });
+      for (const row of rows) {
+        cached.set(
+          `${row.date.toISOString().slice(0, 10)}|${row.toCurrency}`,
+          row.rate,
+        );
+      }
+    }
+    const eurRate = (currency: string, day: string) =>
+      currency === REFERENCE_CURRENCY
+        ? new Prisma.Decimal(1)
+        : cached.get(`${day}|${currency}`);
+
+    const results = new Array<Prisma.Decimal>(requests.length);
+    const missingByDay = new Map<string, number[]>();
+    requests.forEach(({ from, to }, i) => {
+      if (from === to) {
+        results[i] = new Prisma.Decimal(1);
+        return;
+      }
+      const eurToFrom = eurRate(from, dayOf[i]);
+      const eurToTo = eurRate(to, dayOf[i]);
+      if (eurToFrom && eurToTo) {
+        results[i] = eurToTo.dividedBy(eurToFrom);
+      } else {
+        missingByDay.set(dayOf[i], [...(missingByDay.get(dayOf[i]) ?? []), i]);
+      }
+    });
+
+    const missingDays = [...missingByDay.values()];
+    for (let i = 0; i < missingDays.length; i += RATE_FETCH_CONCURRENCY) {
+      await Promise.all(
+        missingDays.slice(i, i + RATE_FETCH_CONCURRENCY).map(async (idxs) => {
+          for (const idx of idxs) {
+            const { from, to, date } = requests[idx];
+            results[idx] = await this.getRate(from, to, date);
+          }
+        }),
       );
     }
+    return results;
+  }
+
+  async getRate(from: string, to: string, date: Date): Promise<Prisma.Decimal> {
+    this.assertSupported([from, to]);
 
     if (from === to) {
       return new Prisma.Decimal(1);
@@ -139,6 +200,24 @@ export class CurrencyService {
     } catch (error) {
       this.logger.warn(
         `Failed to refresh daily exchange rates: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private assertSupported(codes: string[]): void {
+    const unsupported = [
+      ...new Set(
+        codes.filter(
+          (currency) =>
+            !(SUPPORTED_CURRENCIES as readonly string[]).includes(currency),
+        ),
+      ),
+    ];
+    if (unsupported.length > 0) {
+      throw new AppException(
+        ERROR_CODES.CURRENCY_NOT_SUPPORTED,
+        HttpStatus.BAD_REQUEST,
+        `Unsupported currency code(s): ${unsupported.join(', ')}`,
       );
     }
   }
