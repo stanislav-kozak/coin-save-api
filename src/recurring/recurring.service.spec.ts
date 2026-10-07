@@ -75,7 +75,8 @@ describe('RecurringService', () => {
         dayOfMonth: 5,
         startDate: new Date('2026-07-01T00:00:00.000Z'),
         endDate: undefined,
-        lastGeneratedAt: new Date('2026-08-15T12:00:00.000Z'),
+        // now = 2026-08-15, day 5: August 5 has passed and is not back-filled.
+        lastGeneratedAt: new Date('2026-08-05T00:00:00.000Z'),
         createdById: 'u1',
       },
     });
@@ -237,20 +238,56 @@ describe('RecurringService', () => {
   });
 
   describe('createRecurringTransaction backfill avoidance', () => {
-    it('seeds lastGeneratedAt to the creation time when startDate is in the past', async () => {
+    // now = 2026-08-15. Past due dates are not back-filled; this month's
+    // is still generated when its day hasn't passed yet.
+    it('seeds lastGeneratedAt to the last due date before today when startDate is in the past', async () => {
       const { service, prisma } = buildService();
       prisma.recurringTransaction.create.mockResolvedValue({ id: 'r1' });
 
       await service.createRecurringTransaction('s1', 'u1', {
         ...baseInput,
+        dayOfMonth: 5,
         startDate: '2026-01-01T00:00:00.000Z',
       });
 
       const createdData =
         prisma.recurringTransaction.create.mock.calls[0][0].data;
       expect(createdData.lastGeneratedAt).toEqual(
-        new Date('2026-08-15T12:00:00.000Z'),
+        new Date('2026-08-05T00:00:00.000Z'),
       );
+    });
+
+    it("keeps this month's payment when its day is still ahead", async () => {
+      const { service, prisma } = buildService();
+      prisma.recurringTransaction.create.mockResolvedValue({ id: 'r1' });
+
+      await service.createRecurringTransaction('s1', 'u1', {
+        ...baseInput,
+        dayOfMonth: 20,
+        startDate: '2026-07-01T00:00:00.000Z',
+      });
+
+      const createdData =
+        prisma.recurringTransaction.create.mock.calls[0][0].data;
+      // July 20 is not back-filled; August 20 is next.
+      expect(createdData.lastGeneratedAt).toEqual(
+        new Date('2026-07-20T00:00:00.000Z'),
+      );
+    });
+
+    it('leaves lastGeneratedAt unset when no due date has passed since startDate', async () => {
+      const { service, prisma } = buildService();
+      prisma.recurringTransaction.create.mockResolvedValue({ id: 'r1' });
+
+      await service.createRecurringTransaction('s1', 'u1', {
+        ...baseInput,
+        dayOfMonth: 20,
+        startDate: '2026-08-01T00:00:00.000Z',
+      });
+
+      const createdData =
+        prisma.recurringTransaction.create.mock.calls[0][0].data;
+      expect(createdData.lastGeneratedAt).toBeUndefined();
     });
 
     it('leaves lastGeneratedAt unset when startDate is in the future', async () => {
@@ -489,11 +526,19 @@ describe('RecurringService', () => {
       expect(result.active).toBe(false);
     });
 
-    it('resume sets active to true', async () => {
+    it("resume skips payments missed while paused but keeps this month's upcoming one", async () => {
+      // Netflix on the 20th, paused since June (last generated June 20),
+      // resumed on August 15: July 20 is not back-filled, August 20 is.
       const { service, prisma } = buildService({
         prisma: {
           recurringTransaction: {
-            findUnique: vi.fn().mockResolvedValue({ id: 'r1', spaceId: 's1' }),
+            findUnique: vi.fn().mockResolvedValue({
+              id: 'r1',
+              spaceId: 's1',
+              dayOfMonth: 20,
+              startDate: new Date('2026-01-01T00:00:00.000Z'),
+              lastGeneratedAt: new Date('2026-06-20T00:00:00.000Z'),
+            }),
             update: vi.fn().mockResolvedValue({ id: 'r1', active: true }),
           },
         },
@@ -505,10 +550,34 @@ describe('RecurringService', () => {
         where: { id: 'r1' },
         data: {
           active: true,
-          lastGeneratedAt: new Date('2026-08-15T12:00:00.000Z'),
+          lastGeneratedAt: new Date('2026-07-20T00:00:00.000Z'),
         },
       });
       expect(result.active).toBe(true);
+    });
+
+    it('resume never moves lastGeneratedAt backwards', async () => {
+      const { service, prisma } = buildService({
+        prisma: {
+          recurringTransaction: {
+            findUnique: vi.fn().mockResolvedValue({
+              id: 'r1',
+              spaceId: 's1',
+              dayOfMonth: 5,
+              startDate: new Date('2026-01-01T00:00:00.000Z'),
+              lastGeneratedAt: new Date('2026-08-10T00:00:00.000Z'),
+            }),
+            update: vi.fn().mockResolvedValue({ id: 'r1', active: true }),
+          },
+        },
+      });
+
+      await service.resumeRecurringTransaction('s1', 'r1');
+
+      expect(prisma.recurringTransaction.update).toHaveBeenCalledWith({
+        where: { id: 'r1' },
+        data: { active: true },
+      });
     });
   });
 

@@ -105,3 +105,32 @@ export function computeNextOccurrenceDate(
 
   return dueDate;
 }
+
+export interface LastDueDateBeforeInput {
+  startDate: Date;
+  dayOfMonth: number;
+  before: Date;
+}
+
+/**
+ * The most recent due date strictly before the day of `before` (today's due
+ * date counts as not yet passed), or null if none has passed since
+ * startDate. Used as lastGeneratedAt when creating or resuming a rule, so
+ * occurrences that are already past are not back-filled while this month's
+ * upcoming one is still generated.
+ */
+export function lastDueDateBefore(input: LastDueDateBeforeInput): Date | null {
+  const { startDate, dayOfMonth, before } = input;
+  const today = startOfDayUtc(before);
+
+  let monthStart = firstOfMonthUtc(today);
+  let dueDate = clampedDueDate(monthStart, dayOfMonth);
+  if (dueDate.getTime() >= today.getTime()) {
+    monthStart = addMonthsUtc(monthStart, -1);
+    dueDate = clampedDueDate(monthStart, dayOfMonth);
+  }
+
+  return dueDate.getTime() < startOfDayUtc(startDate).getTime()
+    ? null
+    : dueDate;
+}

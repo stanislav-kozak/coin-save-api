@@ -1,6 +1,7 @@
 import {
   computeDueDates,
   computeNextOccurrenceDate,
+  lastDueDateBefore,
 } from './recurring-due-dates';
 
 describe('computeDueDates', () => {
@@ -209,5 +210,49 @@ describe('computeNextOccurrenceDate', () => {
     });
 
     expect(result).toEqual(new Date('2026-04-05T00:00:00.000Z'));
+  });
+});
+
+describe('lastDueDateBefore', () => {
+  const before = new Date('2026-08-15T12:00:00.000Z');
+  const startDate = new Date('2026-01-01T00:00:00.000Z');
+  const utc = (d: string) => new Date(`${d}T00:00:00.000Z`);
+
+  it("returns last month's due date when this month's is still ahead", () => {
+    expect(lastDueDateBefore({ startDate, dayOfMonth: 20, before })).toEqual(
+      utc('2026-07-20'),
+    );
+  });
+
+  it("treats today's due date as not yet passed", () => {
+    expect(lastDueDateBefore({ startDate, dayOfMonth: 15, before })).toEqual(
+      utc('2026-07-15'),
+    );
+  });
+
+  it("returns this month's due date once it has passed", () => {
+    expect(lastDueDateBefore({ startDate, dayOfMonth: 10, before })).toEqual(
+      utc('2026-08-10'),
+    );
+  });
+
+  it('returns null when no due date has passed since startDate', () => {
+    expect(
+      lastDueDateBefore({
+        startDate: utc('2026-08-01'),
+        dayOfMonth: 20,
+        before,
+      }),
+    ).toBeNull();
+  });
+
+  it('clamps to the last day of a short month', () => {
+    expect(
+      lastDueDateBefore({
+        startDate,
+        dayOfMonth: 31,
+        before: new Date('2026-03-15T12:00:00.000Z'),
+      }),
+    ).toEqual(utc('2026-02-28'));
   });
 });
