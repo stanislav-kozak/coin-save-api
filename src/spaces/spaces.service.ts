@@ -2,12 +2,14 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import * as argon2 from 'argon2';
-import { Role, type Space, type Membership } from '@prisma/client';
+import { Prisma, Role, type Space, type Membership } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 import { emailMatches, normalizeEmail } from '../common/utils/email';
+import { CurrencyService } from '../currencies/currencies.service';
+import { DEFAULT_TIME_ZONE, toZonedDate } from '../common/utils/time-zone';
 import { findMatchingToken } from '../common/utils/find-matching-token';
 import { slugify } from '../common/utils/slugify';
 import { DEFAULT_CATEGORIES } from './constants/default-categories';
@@ -49,6 +51,7 @@ export class SpacesService {
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
+    private readonly currency: CurrencyService,
   ) {}
 
   async createSpace(ownerId: string, name: string): Promise<Space> {
@@ -102,11 +105,87 @@ export class SpacesService {
     return space;
   }
 
-  updateSpace(
+  async updateSpace(
     spaceId: string,
     data: { name?: string; primaryCurrency?: string },
   ): Promise<Space> {
-    return this.prisma.space.update({ where: { id: spaceId }, data });
+    const current = await this.getSpace(spaceId);
+    const to = data.primaryCurrency;
+    if (!to || to === current.primaryCurrency) {
+      return this.prisma.space.update({ where: { id: spaceId }, data });
+    }
+
+    // Everything denominated in the primary currency moves with it:
+    // each transaction is re-converted at the historical rate of its own day
+    // (as if it had been created in the new currency), and category limits
+    // at today's rate, rounded to whole units.
+    // All rates are fetched before writing anything, so a missing rate
+    // leaves the space untouched; the writes then happen in one transaction.
+    const expenses = await this.prisma.expense.findMany({
+      where: { spaceId },
+      select: {
+        id: true,
+        amount: true,
+        walletCurrency: true,
+        occurredAt: true,
+      },
+    });
+    const rates = new Map<string, Prisma.Decimal>();
+    const expenseUpdates: Prisma.PrismaPromise<unknown>[] = [];
+    for (const expense of expenses) {
+      const key = `${expense.walletCurrency}|${toZonedDate(expense.occurredAt, DEFAULT_TIME_ZONE)}`;
+      let fxRate = rates.get(key);
+      if (!fxRate) {
+        fxRate = (
+          await this.currency.getRate(
+            expense.walletCurrency,
+            to,
+            expense.occurredAt,
+          )
+        ).toDecimalPlaces(8);
+        rates.set(key, fxRate);
+      }
+      expenseUpdates.push(
+        this.prisma.expense.update({
+          where: { id: expense.id },
+          data: {
+            fxRate,
+            amountInPrimary: new Prisma.Decimal(expense.amount).times(fxRate),
+          },
+        }),
+      );
+    }
+
+    const categories = await this.prisma.category.findMany({
+      where: { spaceId, monthlyLimit: { not: null } },
+      select: { id: true, monthlyLimit: true },
+    });
+    const limitUpdates: Prisma.PrismaPromise<unknown>[] = [];
+    if (categories.length > 0) {
+      const limitRate = await this.currency.getRate(
+        current.primaryCurrency,
+        to,
+        new Date(),
+      );
+      for (const category of categories) {
+        const converted = new Prisma.Decimal(category.monthlyLimit!)
+          .times(limitRate)
+          .toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP);
+        limitUpdates.push(
+          this.prisma.category.update({
+            where: { id: category.id },
+            data: { monthlyLimit: Prisma.Decimal.max(converted, 1) },
+          }),
+        );
+      }
+    }
+
+    const results = await this.prisma.$transaction([
+      ...expenseUpdates,
+      ...limitUpdates,
+      this.prisma.space.update({ where: { id: spaceId }, data }),
+    ]);
+    return results[results.length - 1] as Space;
   }
 
   async deleteSpace(spaceId: string): Promise<void> {

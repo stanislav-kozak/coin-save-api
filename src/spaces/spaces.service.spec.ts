@@ -1,8 +1,9 @@
 import { HttpStatus } from '@nestjs/common';
 import * as argon2 from 'argon2';
-import { Role } from '@prisma/client';
+import { Prisma, Role } from '@prisma/client';
 import { SpacesService } from './spaces.service';
 import { AppException } from '../common/exceptions/app.exception';
+import { ERROR_CODES } from '../common/constants/error-codes';
 import {
   buildPrismaMock,
   type PrismaMock,
@@ -13,6 +14,7 @@ function buildService(
     prisma?: Partial<{ [K in keyof PrismaMock]: Partial<PrismaMock[K]> }>;
     mail?: Record<string, unknown>;
     config?: Record<string, unknown>;
+    currency?: Record<string, unknown>;
   } = {},
 ) {
   const basePrisma = {
@@ -38,7 +40,8 @@ function buildService(
       delete: vi.fn(),
       deleteMany: vi.fn(),
     },
-    category: { createMany: vi.fn() },
+    category: { createMany: vi.fn(), findMany: vi.fn(), update: vi.fn() },
+    expense: { findMany: vi.fn().mockResolvedValue([]), update: vi.fn() },
     user: { findUnique: vi.fn(), findFirst: vi.fn() },
   };
   const prisma = buildPrismaMock(basePrisma, overrides.prisma);
@@ -50,12 +53,16 @@ function buildService(
     get: vi.fn().mockReturnValue('http://localhost:3001'),
     ...overrides.config,
   };
+  const currency = { getRate: vi.fn(), ...overrides.currency };
+  // Batch transaction: resolves the queued operations in order.
+  const $transaction = vi.fn((ops: Promise<unknown>[]) => Promise.all(ops));
   const service = new SpacesService(
-    prisma as never,
+    Object.assign(prisma, { $transaction }) as never,
     mail as never,
     config as never,
+    currency as never,
   );
-  return { service, prisma, mail, config };
+  return { service, prisma, mail, config, currency, $transaction };
 }
 
 describe('SpacesService', () => {
@@ -247,6 +254,157 @@ describe('SpacesService', () => {
     expect(prisma.invitation.update).toHaveBeenCalledWith({
       where: { id: 'inv1' },
       data: { acceptedAt: expect.any(Date) },
+    });
+  });
+
+  describe('updateSpace primary currency', () => {
+    const D = (n: number | string) => new Prisma.Decimal(n);
+
+    it('recomputes every transaction at its historical rate and converts limits', async () => {
+      const getRate = vi.fn((from: string, to: string) => {
+        if (from === to) return Promise.resolve(D(1));
+        if (from === 'USD' && to === 'UAH') return Promise.resolve(D(41.5));
+        if (from === 'EUR' && to === 'UAH')
+          return Promise.resolve(D('48.7341'));
+        return Promise.reject(new Error(`unexpected ${from}->${to}`));
+      });
+      const { service, prisma, $transaction } = buildService({
+        currency: { getRate },
+        prisma: {
+          space: {
+            findUnique: vi
+              .fn()
+              .mockResolvedValue({ id: 's1', primaryCurrency: 'EUR' }),
+            update: vi
+              .fn()
+              .mockResolvedValue({ id: 's1', primaryCurrency: 'UAH' }),
+          },
+          expense: {
+            findMany: vi.fn().mockResolvedValue([
+              {
+                id: 'e1',
+                amount: D(100),
+                walletCurrency: 'USD',
+                occurredAt: new Date('2026-06-01T10:00:00Z'),
+              },
+              {
+                id: 'e2',
+                amount: D(50),
+                walletCurrency: 'UAH',
+                occurredAt: new Date('2026-06-01T12:00:00Z'),
+              },
+              {
+                id: 'e3',
+                amount: D(20),
+                walletCurrency: 'USD',
+                occurredAt: new Date('2026-06-01T15:00:00Z'),
+              },
+            ]),
+          },
+          category: {
+            findMany: vi.fn().mockResolvedValue([
+              { id: 'c1', monthlyLimit: D(100) },
+              { id: 'c2', monthlyLimit: D('0.01') },
+            ]),
+          },
+        },
+      });
+
+      const result = await service.updateSpace('s1', {
+        primaryCurrency: 'UAH',
+      });
+
+      expect(result).toEqual({ id: 's1', primaryCurrency: 'UAH' });
+      // One lookup per (currency, Kyiv day): e1 and e3 share USD on 01.06.
+      const usdCalls = getRate.mock.calls.filter(([from]) => from === 'USD');
+      expect(usdCalls).toHaveLength(1);
+
+      const expenseUpdates = prisma.expense.update.mock.calls.map(
+        ([arg]) =>
+          arg as {
+            where: { id: string };
+            data: { fxRate: Prisma.Decimal; amountInPrimary: Prisma.Decimal };
+          },
+      );
+      const byId = Object.fromEntries(
+        expenseUpdates.map((u) => [u.where.id, u.data]),
+      );
+      expect(byId.e1.amountInPrimary.toNumber()).toBe(4150);
+      expect(byId.e1.fxRate.toNumber()).toBe(41.5);
+      expect(byId.e2.amountInPrimary.toNumber()).toBe(50);
+      expect(byId.e3.amountInPrimary.toNumber()).toBe(830);
+
+      // 100 EUR * 48.7341 = 4873.41 -> 4873; a tiny limit never becomes 0.
+      expect(prisma.category.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: { monthlyLimit: D(4873) },
+      });
+      expect(prisma.category.update).toHaveBeenCalledWith({
+        where: { id: 'c2' },
+        data: { monthlyLimit: D(1) },
+      });
+      expect(prisma.space.update).toHaveBeenCalledWith({
+        where: { id: 's1' },
+        data: { primaryCurrency: 'UAH' },
+      });
+      expect($transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('just updates the space when the currency is not changing', async () => {
+      const { service, prisma, currency, $transaction } = buildService({
+        prisma: {
+          space: {
+            findUnique: vi
+              .fn()
+              .mockResolvedValue({ id: 's1', primaryCurrency: 'EUR' }),
+            update: vi.fn().mockResolvedValue({ id: 's1', name: 'Home' }),
+          },
+        },
+      });
+
+      await service.updateSpace('s1', { name: 'Home', primaryCurrency: 'EUR' });
+
+      expect(currency.getRate).not.toHaveBeenCalled();
+      expect($transaction).not.toHaveBeenCalled();
+      expect(prisma.space.update).toHaveBeenCalledWith({
+        where: { id: 's1' },
+        data: { name: 'Home', primaryCurrency: 'EUR' },
+      });
+    });
+
+    it('changes nothing when a rate cannot be obtained', async () => {
+      const unavailable = new AppException(
+        ERROR_CODES.CURRENCY_API_UNAVAILABLE,
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'Exchange rate unavailable',
+      );
+      const { service, prisma, $transaction } = buildService({
+        currency: { getRate: vi.fn().mockRejectedValue(unavailable) },
+        prisma: {
+          space: {
+            findUnique: vi
+              .fn()
+              .mockResolvedValue({ id: 's1', primaryCurrency: 'EUR' }),
+          },
+          expense: {
+            findMany: vi.fn().mockResolvedValue([
+              {
+                id: 'e1',
+                amount: D(100),
+                walletCurrency: 'USD',
+                occurredAt: new Date('2026-06-01T10:00:00Z'),
+              },
+            ]),
+          },
+        },
+      });
+
+      await expect(
+        service.updateSpace('s1', { primaryCurrency: 'UAH' }),
+      ).rejects.toBe(unavailable);
+      expect($transaction).not.toHaveBeenCalled();
+      expect(prisma.expense.update).not.toHaveBeenCalled();
+      expect(prisma.space.update).not.toHaveBeenCalled();
     });
   });
 });

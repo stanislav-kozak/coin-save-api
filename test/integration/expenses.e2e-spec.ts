@@ -12,7 +12,11 @@ import { AppExceptionFilter } from '../../src/common/filters/app-exception.filte
 import { CurrencyService } from '../../src/currencies/currencies.service';
 import { MailService } from '../../src/mail/mail.service';
 import { createCookieAgent } from '../helpers/cookie-agent';
-import { frankfurterOk, mockFetch } from '../helpers/currency-fetch-mock';
+import {
+  failing,
+  frankfurterOk,
+  mockFetch,
+} from '../helpers/currency-fetch-mock';
 
 describe('Expenses flow (integration)', () => {
   let container: StartedPostgreSqlContainer;
@@ -186,5 +190,98 @@ describe('Expenses flow (integration)', () => {
       .get(`/api/spaces/${spaceId}/expenses/${expenseId}`)
       .expect(404);
     expect(notFoundRes.body.code).toBe('EXPENSE_NOT_FOUND');
+  });
+
+  it('re-converts transactions and limits when the primary currency changes', async () => {
+    // Rates per EUR: 1 EUR = 1.1 USD = 4.3 PLN (same for every day here).
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({ frankfurter: frankfurterOk({ USD: 1.1, PLN: 4.3 }) }),
+    );
+
+    const agent = createCookieAgent(app);
+    const email = 'currency-owner@example.com';
+    const password = 'super-secret-1';
+    await agent.post('/api/auth/signup').send({ email, password }).expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await agent
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+    await agent.post('/api/auth/login').send({ email, password }).expect(200);
+
+    const spaceId = (
+      await agent.post('/api/spaces').send({ name: 'FX' }).expect(201)
+    ).body.id as string; // primaryCurrency EUR
+    const walletId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/wallets`)
+        .send({ name: 'Dollars', currency: 'USD', initialBalance: 0 })
+        .expect(201)
+    ).body.id as string;
+    const categoryId = (
+      (await agent.get(`/api/spaces/${spaceId}/categories`).expect(200))
+        .body as { id: string }[]
+    )[0].id;
+    await agent
+      .patch(`/api/spaces/${spaceId}/categories/${categoryId}`)
+      .send({ monthlyLimit: 100 })
+      .expect(200);
+    const expenseId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/expenses`)
+        .send({
+          walletId,
+          categoryId,
+          type: TransactionType.EXPENSE,
+          amount: 110,
+          occurredAt: '2026-06-10T12:00:00.000Z',
+        })
+        .expect(201)
+    ).body.id as string;
+
+    await agent
+      .patch(`/api/spaces/${spaceId}`)
+      .send({ primaryCurrency: 'XYZ' })
+      .expect(400);
+
+    const changed = await agent
+      .patch(`/api/spaces/${spaceId}`)
+      .send({ primaryCurrency: 'PLN' })
+      .expect(200);
+    expect(changed.body.primaryCurrency).toBe('PLN');
+
+    const expense = await agent
+      .get(`/api/spaces/${spaceId}/expenses/${expenseId}`)
+      .expect(200);
+    expect(Number(expense.body.amountInPrimary)).toBeCloseTo(430, 2); // 110 USD
+    expect(Number(expense.body.fxRate)).toBeCloseTo(4.3 / 1.1, 6);
+
+    const category = await agent
+      .get(`/api/spaces/${spaceId}/categories/${categoryId}`)
+      .expect(200);
+    expect(Number(category.body.monthlyLimit)).toBe(430); // 100 EUR
+
+    const analytics = await agent
+      .get(`/api/spaces/${spaceId}/analytics?from=2026-06-01&to=2026-06-30`)
+      .expect(200);
+    expect(analytics.body.currency).toBe('PLN');
+    expect(Number(analytics.body.totalExpense)).toBeCloseTo(430, 2);
+
+    // No CHF rate cached and the provider is down: nothing may change.
+    vi.stubGlobal('fetch', mockFetch({ frankfurter: failing() }));
+    const unavailable = await agent
+      .patch(`/api/spaces/${spaceId}`)
+      .send({ primaryCurrency: 'CHF' })
+      .expect(503);
+    expect(unavailable.body.code).toBe('CURRENCY_API_UNAVAILABLE');
+    const after = await agent.get(`/api/spaces/${spaceId}`).expect(200);
+    expect(after.body.primaryCurrency).toBe('PLN');
+    const expenseAfter = await agent
+      .get(`/api/spaces/${spaceId}/expenses/${expenseId}`)
+      .expect(200);
+    expect(Number(expenseAfter.body.amountInPrimary)).toBeCloseTo(430, 2);
   });
 });
