@@ -3,11 +3,19 @@ import { EventsGateway } from './events.gateway';
 function buildSocket(
   overrides: {
     authToken?: string;
+    cookie?: string;
+    origin?: string;
     data?: Record<string, unknown>;
   } = {},
 ) {
   return {
-    handshake: { auth: { token: overrides.authToken } },
+    handshake: {
+      auth: { token: overrides.authToken },
+      headers: {
+        ...(overrides.cookie ? { cookie: overrides.cookie } : {}),
+        ...(overrides.origin ? { origin: overrides.origin } : {}),
+      },
+    },
     data: overrides.data ?? {},
     disconnect: vi.fn(),
     join: vi.fn().mockResolvedValue(undefined),
@@ -31,43 +39,85 @@ function buildGateway(
       findUnique: vi.fn().mockResolvedValue(overrides.membership ?? null),
     },
   };
-  const gateway = new EventsGateway(jwtService as never, prisma as never);
+  const config = {
+    get: vi.fn().mockReturnValue('https://app.coinsavekeeper.com'),
+  };
+  const gateway = new EventsGateway(
+    jwtService as never,
+    prisma as never,
+    config as never,
+  );
   return { gateway, jwtService, prisma };
 }
 
+async function authenticate(
+  gateway: EventsGateway,
+  socket: ReturnType<typeof buildSocket>,
+): Promise<Error | undefined> {
+  return new Promise((resolve) => {
+    void gateway.authenticateHandshake(socket as never, (err?: Error) =>
+      resolve(err),
+    );
+  });
+}
+
 describe('EventsGateway', () => {
-  describe('handleConnection', () => {
-    it('verifies the handshake token and sets client.data.userId on success', async () => {
+  describe('authenticateHandshake (io middleware)', () => {
+    it('authenticates from the httpOnly access cookie the browser sends', async () => {
       const { gateway, jwtService } = buildGateway();
-      const client = buildSocket({ authToken: 'valid-token' });
-
-      await gateway.handleConnection(client as never);
-
-      expect(jwtService.verifyAsync).toHaveBeenCalledWith('valid-token');
-      expect(client.data.userId).toBe('u1');
-      expect(client.disconnect).not.toHaveBeenCalled();
-    });
-
-    it('disconnects a client with no token', async () => {
-      const { gateway } = buildGateway();
-      const client = buildSocket({ authToken: undefined });
-
-      await gateway.handleConnection(client as never);
-
-      expect(client.disconnect).toHaveBeenCalled();
-      expect(client.data.userId).toBeUndefined();
-    });
-
-    it('disconnects a client whose token fails verification', async () => {
-      const { gateway } = buildGateway({
-        verifyAsync: vi.fn().mockRejectedValue(new Error('invalid token')),
+      const socket = buildSocket({
+        cookie: 'session=1; access=cookie-token; other=x',
+        origin: 'https://app.coinsavekeeper.com',
       });
-      const client = buildSocket({ authToken: 'bad-token' });
 
-      await gateway.handleConnection(client as never);
+      const err = await authenticate(gateway, socket);
 
-      expect(client.disconnect).toHaveBeenCalled();
-      expect(client.data.userId).toBeUndefined();
+      expect(err).toBeUndefined();
+      expect(jwtService.verifyAsync).toHaveBeenCalledWith('cookie-token');
+      expect(socket.data.userId).toBe('u1');
+    });
+
+    it('falls back to handshake.auth.token for non-browser clients', async () => {
+      const { gateway, jwtService } = buildGateway();
+      const socket = buildSocket({ authToken: 'auth-token' });
+
+      expect(await authenticate(gateway, socket)).toBeUndefined();
+      expect(jwtService.verifyAsync).toHaveBeenCalledWith('auth-token');
+    });
+
+    it('rejects with a connect error UNAUTHORIZED (not a server disconnect) when there is no token', async () => {
+      const { gateway } = buildGateway();
+      const socket = buildSocket();
+
+      const err = await authenticate(gateway, socket);
+
+      expect(err?.message).toBe('UNAUTHORIZED');
+      expect(socket.disconnect).not.toHaveBeenCalled();
+    });
+
+    it('rejects UNAUTHORIZED when the token fails verification (e.g. expired)', async () => {
+      const { gateway } = buildGateway({
+        verifyAsync: vi.fn().mockRejectedValue(new Error('jwt expired')),
+      });
+
+      const err = await authenticate(
+        gateway,
+        buildSocket({ cookie: 'access=expired' }),
+      );
+
+      expect(err?.message).toBe('UNAUTHORIZED');
+    });
+
+    it('rejects connections from another site (cross-site WebSocket hijacking)', async () => {
+      const { gateway, jwtService } = buildGateway();
+
+      const err = await authenticate(
+        gateway,
+        buildSocket({ cookie: 'access=t', origin: 'https://evil.example' }),
+      );
+
+      expect(err?.message).toBe('FORBIDDEN_ORIGIN');
+      expect(jwtService.verifyAsync).not.toHaveBeenCalled();
     });
   });
 
@@ -78,8 +128,11 @@ describe('EventsGateway', () => {
       });
       const client = buildSocket({ data: { userId: 'u1' } });
 
-      await gateway.handleSubscribe(client as never, { spaceId: 's1' });
+      const ack = await gateway.handleSubscribe(client as never, {
+        spaceId: 's1',
+      });
 
+      expect(ack).toEqual({ ok: true });
       expect(prisma.membership.findUnique).toHaveBeenCalledWith({
         where: { userId_spaceId: { userId: 'u1', spaceId: 's1' } },
       });
@@ -90,8 +143,11 @@ describe('EventsGateway', () => {
       const { gateway } = buildGateway({ membership: null });
       const client = buildSocket({ data: { userId: 'u1' } });
 
-      await gateway.handleSubscribe(client as never, { spaceId: 's1' });
+      const ack = await gateway.handleSubscribe(client as never, {
+        spaceId: 's1',
+      });
 
+      expect(ack).toEqual({ ok: false, code: 'FORBIDDEN_NOT_MEMBER' });
       expect(client.join).not.toHaveBeenCalled();
     });
 
@@ -99,9 +155,21 @@ describe('EventsGateway', () => {
       const { gateway } = buildGateway();
       const client = buildSocket({ data: {} });
 
-      await gateway.handleSubscribe(client as never, { spaceId: 's1' });
+      const ack = await gateway.handleSubscribe(client as never, {
+        spaceId: 's1',
+      });
 
+      expect(ack).toEqual({ ok: false, code: 'UNAUTHORIZED' });
       expect(client.join).not.toHaveBeenCalled();
+    });
+
+    it('answers VALIDATION_ERROR when spaceId is missing', async () => {
+      const { gateway } = buildGateway();
+      const client = buildSocket({ data: { userId: 'u1' } });
+
+      const ack = await gateway.handleSubscribe(client as never, {} as never);
+
+      expect(ack).toEqual({ ok: false, code: 'VALIDATION_ERROR' });
     });
   });
 
