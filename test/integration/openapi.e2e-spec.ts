@@ -179,6 +179,16 @@ describe('OpenAPI contract (integration)', () => {
     ).toBeUndefined();
   });
 
+  it('lets an expense update clear the category and note with null', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/docs.json')
+      .expect(200);
+    const props = res.body.components.schemas.UpdateExpenseDto.properties;
+
+    expect(props.categoryId).toMatchObject({ type: 'string', nullable: true });
+    expect(props.note).toMatchObject({ type: 'string', nullable: true });
+  });
+
   it('documents the error envelope with every API error code', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/docs.json')

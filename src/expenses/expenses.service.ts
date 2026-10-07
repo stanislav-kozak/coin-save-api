@@ -36,10 +36,10 @@ export interface ListExpensesFilter {
 
 export interface UpdateExpenseInput {
   walletId?: string;
-  categoryId?: string;
+  categoryId?: string | null;
   amount?: number;
   occurredAt?: string;
-  note?: string;
+  note?: string | null;
 }
 
 @Injectable()

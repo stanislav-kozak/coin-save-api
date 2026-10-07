@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsISO8601,
   IsNumber,
@@ -15,10 +16,16 @@ export class UpdateExpenseDto {
   @IsString()
   walletId?: string;
 
-  // null is accepted deliberately to clear the field (Uncategorized).
+  // null is accepted deliberately to clear the field (Uncategorized):
+  // IsOptional skips the string check for null.
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: 'Omit to keep; null makes the expense uncategorized',
+  })
   @IsOptional()
   @IsString()
-  categoryId?: string;
+  categoryId?: string | null;
 
   @ValidateIf((o: UpdateExpenseDto) => o.amount !== undefined)
   @IsNumber({ maxDecimalPlaces: 4 })
@@ -32,8 +39,14 @@ export class UpdateExpenseDto {
   occurredAt?: string;
 
   // null is accepted deliberately to clear the field.
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    maxLength: 500,
+    description: 'Omit to keep; null removes the note',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(500)
-  note?: string;
+  note?: string | null;
 }
