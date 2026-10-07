@@ -242,6 +242,37 @@ describe('Expenses flow (integration)', () => {
         .expect(201)
     ).body.id as string;
 
+    // More rows across days and wallet currencies, to exercise the batched
+    // rate lookup and set-based updates.
+    const plnWalletId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/wallets`)
+        .send({ name: 'Zloty', currency: 'PLN', initialBalance: 0 })
+        .expect(201)
+    ).body.id as string;
+    const plnExpenseId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/expenses`)
+        .send({
+          walletId: plnWalletId,
+          type: TransactionType.EXPENSE,
+          amount: 43,
+          occurredAt: '2026-06-11T09:00:00.000Z',
+        })
+        .expect(201)
+    ).body.id as string;
+    const secondUsdExpenseId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/expenses`)
+        .send({
+          walletId,
+          type: TransactionType.INCOME,
+          amount: 22,
+          occurredAt: '2026-06-12T09:00:00.000Z',
+        })
+        .expect(201)
+    ).body.id as string;
+
     await agent
       .patch(`/api/spaces/${spaceId}`)
       .send({ primaryCurrency: 'XYZ' })
@@ -258,6 +289,18 @@ describe('Expenses flow (integration)', () => {
       .expect(200);
     expect(Number(expense.body.amountInPrimary)).toBeCloseTo(430, 2); // 110 USD
     expect(Number(expense.body.fxRate)).toBeCloseTo(4.3 / 1.1, 6);
+    const plnExpense = await agent
+      .get(`/api/spaces/${spaceId}/expenses/${plnExpenseId}`)
+      .expect(200);
+    expect(Number(plnExpense.body.amountInPrimary)).toBe(43); // PLN -> PLN
+    expect(Number(plnExpense.body.fxRate)).toBe(1);
+    const secondUsd = await agent
+      .get(`/api/spaces/${spaceId}/expenses/${secondUsdExpenseId}`)
+      .expect(200);
+    expect(Number(secondUsd.body.amountInPrimary)).toBeCloseTo(86, 2); // 22 USD
+    expect(new Date(secondUsd.body.updatedAt).getTime()).toBeGreaterThanOrEqual(
+      new Date(changed.body.updatedAt).getTime() - 1000,
+    );
 
     const category = await agent
       .get(`/api/spaces/${spaceId}/categories/${categoryId}`)
@@ -268,7 +311,7 @@ describe('Expenses flow (integration)', () => {
       .get(`/api/spaces/${spaceId}/analytics?from=2026-06-01&to=2026-06-30`)
       .expect(200);
     expect(analytics.body.currency).toBe('PLN');
-    expect(Number(analytics.body.totalExpense)).toBeCloseTo(430, 2);
+    expect(Number(analytics.body.totalExpense)).toBeCloseTo(473, 2); // 430 + 43 PLN
 
     // No CHF rate cached and the provider is down: nothing may change.
     vi.stubGlobal('fetch', mockFetch({ frankfurter: failing() }));

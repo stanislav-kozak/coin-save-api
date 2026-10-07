@@ -23,6 +23,7 @@ function buildService(
     exchangeRate: {
       findUnique: vi.fn().mockResolvedValue(null),
       findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
       upsert: vi.fn(),
     },
   };
@@ -405,5 +406,85 @@ describe('CurrencyService', () => {
     const rate = await service.getRate('UAH', 'PLN', new Date('2026-06-15'));
 
     expect(rate.toNumber()).toBeCloseTo(4.3 / 41.5, 8);
+  });
+
+  describe('getRates (batch)', () => {
+    const D = (n: number | string) => new Prisma.Decimal(n);
+    const day = (d: string) => new Date(`${d}T00:00:00.000Z`);
+
+    it('answers every cached lookup from a single query, in request order', async () => {
+      const fetchSpy = mockFetch({});
+      vi.stubGlobal('fetch', fetchSpy);
+      const { service, prisma } = buildService({
+        prisma: {
+          exchangeRate: {
+            findMany: vi.fn().mockResolvedValue([
+              { date: day('2026-06-01'), toCurrency: 'USD', rate: D('1.1') },
+              { date: day('2026-06-01'), toCurrency: 'UAH', rate: D('45.1') },
+              { date: day('2026-06-02'), toCurrency: 'USD', rate: D('1.2') },
+            ]),
+          },
+        },
+      });
+      const getRate = vi.spyOn(service, 'getRate');
+
+      const rates = await service.getRates([
+        { from: 'USD', to: 'UAH', date: new Date('2026-06-01T10:00:00Z') },
+        { from: 'UAH', to: 'UAH', date: new Date('2026-06-01T10:00:00Z') },
+        { from: 'EUR', to: 'USD', date: new Date('2026-06-02T10:00:00Z') },
+        { from: 'USD', to: 'EUR', date: new Date('2026-06-02T10:00:00Z') },
+      ]);
+
+      const expected = [45.1 / 1.1, 1, 1.2, 1 / 1.2];
+      expect(rates).toHaveLength(expected.length);
+      rates.forEach((rate, i) =>
+        expect(rate.toNumber()).toBeCloseTo(expected[i], 10),
+      );
+      expect(prisma.exchangeRate.findMany).toHaveBeenCalledTimes(1);
+      expect(getRate).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('falls back to getRate only for lookups whose day is not cached', async () => {
+      const { service, prisma } = buildService({
+        prisma: {
+          exchangeRate: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue([
+                { date: day('2026-06-01'), toCurrency: 'USD', rate: D('1.1') },
+              ]),
+          },
+        },
+      });
+      const getRate = vi.spyOn(service, 'getRate').mockResolvedValue(D(4));
+
+      const rates = await service.getRates([
+        { from: 'EUR', to: 'USD', date: new Date('2026-06-01T10:00:00Z') },
+        { from: 'EUR', to: 'PLN', date: new Date('2026-06-03T10:00:00Z') },
+      ]);
+
+      expect(rates.map((r) => r.toNumber())).toEqual([1.1, 4]);
+      expect(getRate).toHaveBeenCalledTimes(1);
+      expect(getRate).toHaveBeenCalledWith(
+        'EUR',
+        'PLN',
+        new Date('2026-06-03T10:00:00Z'),
+      );
+      expect(prisma.exchangeRate.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects unsupported currencies before touching the database', async () => {
+      const { service, prisma } = buildService();
+
+      await expect(
+        service.getRates([{ from: 'XYZ', to: 'EUR', date: new Date() }]),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: ERROR_CODES.CURRENCY_NOT_SUPPORTED,
+        }) as unknown,
+      });
+      expect(prisma.exchangeRate.findMany).not.toHaveBeenCalled();
+    });
   });
 });

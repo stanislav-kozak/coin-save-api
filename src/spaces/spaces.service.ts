@@ -9,12 +9,22 @@ import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 import { emailMatches, normalizeEmail } from '../common/utils/email';
 import { CurrencyService } from '../currencies/currencies.service';
-import { DEFAULT_TIME_ZONE, toZonedDate } from '../common/utils/time-zone';
 import { findMatchingToken } from '../common/utils/find-matching-token';
 import { slugify } from '../common/utils/slugify';
 import { DEFAULT_CATEGORIES } from './constants/default-categories';
 
 const INVITATION_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Postgres allows 65535 bind parameters per statement; each row uses 2.
+const SINGLE_STATEMENT_MAX_PARAMS = 60_000;
+const UPDATE_BATCH_SIZE = 10_000;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
 
 export interface SpaceWithRole {
   id: string;
@@ -43,6 +53,35 @@ export interface InvitationView {
   invitedById: string;
   expiresAt: Date;
   createdAt: Date;
+}
+
+// Set-based re-conversion: amountInPrimary = amount * rate for each row.
+function expenseRateUpdate(
+  rows: { id: string; fxRate: Prisma.Decimal }[],
+): Prisma.Sql {
+  return Prisma.sql`
+    UPDATE "Expense" AS x
+    SET "fxRate" = v.rate,
+        "amountInPrimary" = x."amount" * v.rate,
+        "updatedAt" = NOW()
+    FROM (VALUES ${Prisma.join(
+      rows.map((r) => Prisma.sql`(${r.id}, ${r.fxRate.toString()}::numeric)`),
+    )}) AS v(id, rate)
+    WHERE x."id" = v.id`;
+}
+
+function categoryLimitUpdate(
+  rows: { id: string; monthlyLimit: Prisma.Decimal }[],
+): Prisma.Sql {
+  return Prisma.sql`
+    UPDATE "Category" AS x
+    SET "monthlyLimit" = v.lim, "updatedAt" = NOW()
+    FROM (VALUES ${Prisma.join(
+      rows.map(
+        (r) => Prisma.sql`(${r.id}, ${r.monthlyLimit.toString()}::numeric)`,
+      ),
+    )}) AS v(id, lim)
+    WHERE x."id" = v.id`;
 }
 
 @Injectable()
@@ -119,70 +158,88 @@ export class SpacesService {
     // each transaction is re-converted at the historical rate of its own day
     // (as if it had been created in the new currency), and category limits
     // at today's rate, rounded to whole units.
-    // All rates are fetched before writing anything, so a missing rate
-    // leaves the space untouched; the writes then happen in one transaction.
-    const expenses = await this.prisma.expense.findMany({
-      where: { spaceId },
-      select: {
-        id: true,
-        amount: true,
-        walletCurrency: true,
-        occurredAt: true,
-      },
-    });
-    const rates = new Map<string, Prisma.Decimal>();
-    const expenseUpdates: Prisma.PrismaPromise<unknown>[] = [];
-    for (const expense of expenses) {
-      const key = `${expense.walletCurrency}|${toZonedDate(expense.occurredAt, DEFAULT_TIME_ZONE)}`;
-      let fxRate = rates.get(key);
-      if (!fxRate) {
-        fxRate = (
-          await this.currency.getRate(
-            expense.walletCurrency,
-            to,
-            expense.occurredAt,
-          )
-        ).toDecimalPlaces(8);
-        rates.set(key, fxRate);
-      }
-      expenseUpdates.push(
-        this.prisma.expense.update({
-          where: { id: expense.id },
-          data: {
-            fxRate,
-            amountInPrimary: new Prisma.Decimal(expense.amount).times(fxRate),
-          },
-        }),
-      );
-    }
+    // Built for few round trips (the database is remote): one batched rate
+    // lookup, then a handful of set-based UPDATEs in one transaction. All
+    // rates are obtained before writing, so a missing rate changes nothing.
+    const [expenses, categories] = await Promise.all([
+      this.prisma.expense.findMany({
+        where: { spaceId },
+        select: {
+          id: true,
+          amount: true,
+          walletCurrency: true,
+          occurredAt: true,
+        },
+      }),
+      this.prisma.category.findMany({
+        where: { spaceId, monthlyLimit: { not: null } },
+        select: { id: true, monthlyLimit: true },
+      }),
+    ]);
 
-    const categories = await this.prisma.category.findMany({
-      where: { spaceId, monthlyLimit: { not: null } },
-      select: { id: true, monthlyLimit: true },
-    });
-    const limitUpdates: Prisma.PrismaPromise<unknown>[] = [];
-    if (categories.length > 0) {
-      const limitRate = await this.currency.getRate(
-        current.primaryCurrency,
+    const rates = await this.currency.getRates([
+      ...expenses.map((e) => ({
+        from: e.walletCurrency,
         to,
-        new Date(),
-      );
-      for (const category of categories) {
-        const converted = new Prisma.Decimal(category.monthlyLimit!)
+        date: e.occurredAt,
+      })),
+      ...(categories.length > 0
+        ? [{ from: current.primaryCurrency, to, date: new Date() }]
+        : []),
+    ]);
+
+    const expenseRows = expenses.map((expense, i) => ({
+      id: expense.id,
+      fxRate: rates[i].toDecimalPlaces(8),
+    }));
+    const limitRate = rates[expenses.length];
+    const limitRows = categories.map((category) => ({
+      id: category.id,
+      monthlyLimit: Prisma.Decimal.max(
+        new Prisma.Decimal(category.monthlyLimit!)
           .times(limitRate)
-          .toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP);
-        limitUpdates.push(
-          this.prisma.category.update({
-            where: { id: category.id },
-            data: { monthlyLimit: Prisma.Decimal.max(converted, 1) },
-          }),
+          .toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP),
+        1,
+      ),
+    }));
+
+    // Usual case: one statement (data-modifying CTEs + the space update).
+    // A single statement is atomic by itself, so no BEGIN/COMMIT round trips.
+    if (
+      (expenseRows.length + limitRows.length) * 2 <=
+      SINGLE_STATEMENT_MAX_PARAMS
+    ) {
+      const ctes: Prisma.Sql[] = [];
+      if (expenseRows.length > 0) {
+        ctes.push(
+          Prisma.sql`e AS (${expenseRateUpdate(expenseRows)} RETURNING 1)`,
         );
       }
+      if (limitRows.length > 0) {
+        ctes.push(
+          Prisma.sql`c AS (${categoryLimitUpdate(limitRows)} RETURNING 1)`,
+        );
+      }
+      const [space] = await this.prisma.$queryRaw<Space[]>`
+        ${ctes.length > 0 ? Prisma.sql`WITH ${Prisma.join(ctes, ', ')}` : Prisma.empty}
+        UPDATE "Space"
+        SET "primaryCurrency" = ${to},
+            "name" = COALESCE(${data.name ?? null}::text, "name"),
+            "updatedAt" = NOW()
+        WHERE "id" = ${spaceId}
+        RETURNING *`;
+      return space;
     }
 
+    // Huge spaces (tens of thousands of transactions): chunked statements in
+    // one transaction, to stay under Postgres' bind-parameter limit.
     const results = await this.prisma.$transaction([
-      ...expenseUpdates,
-      ...limitUpdates,
+      ...chunk(expenseRows, UPDATE_BATCH_SIZE).map((rows) =>
+        this.prisma.$executeRaw(expenseRateUpdate(rows)),
+      ),
+      ...chunk(limitRows, UPDATE_BATCH_SIZE).map((rows) =>
+        this.prisma.$executeRaw(categoryLimitUpdate(rows)),
+      ),
       this.prisma.space.update({ where: { id: spaceId }, data }),
     ]);
     return results[results.length - 1] as Space;

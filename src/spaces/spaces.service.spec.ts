@@ -53,16 +53,31 @@ function buildService(
     get: vi.fn().mockReturnValue('http://localhost:3001'),
     ...overrides.config,
   };
-  const currency = { getRate: vi.fn(), ...overrides.currency };
+  const currency = {
+    getRate: vi.fn(),
+    getRates: vi.fn(),
+    ...overrides.currency,
+  };
   // Batch transaction: resolves the queued operations in order.
   const $transaction = vi.fn((ops: Promise<unknown>[]) => Promise.all(ops));
+  const $executeRaw = vi.fn().mockResolvedValue(1);
+  const $queryRaw = vi.fn();
   const service = new SpacesService(
-    Object.assign(prisma, { $transaction }) as never,
+    Object.assign(prisma, { $transaction, $executeRaw, $queryRaw }) as never,
     mail as never,
     config as never,
     currency as never,
   );
-  return { service, prisma, mail, config, currency, $transaction };
+  return {
+    service,
+    prisma,
+    mail,
+    config,
+    currency,
+    $transaction,
+    $executeRaw,
+    $queryRaw,
+  };
 }
 
 describe('SpacesService', () => {
@@ -261,46 +276,30 @@ describe('SpacesService', () => {
     const D = (n: number | string) => new Prisma.Decimal(n);
 
     it('recomputes every transaction at its historical rate and converts limits', async () => {
-      const getRate = vi.fn((from: string, to: string) => {
-        if (from === to) return Promise.resolve(D(1));
-        if (from === 'USD' && to === 'UAH') return Promise.resolve(D(41.5));
-        if (from === 'EUR' && to === 'UAH')
-          return Promise.resolve(D('48.7341'));
-        return Promise.reject(new Error(`unexpected ${from}->${to}`));
-      });
-      const { service, prisma, $transaction } = buildService({
-        currency: { getRate },
+      const expenses = [
+        {
+          id: 'e1',
+          amount: D(100),
+          walletCurrency: 'USD',
+          occurredAt: new Date('2026-06-01T10:00:00Z'),
+        },
+        {
+          id: 'e2',
+          amount: D(50),
+          walletCurrency: 'UAH',
+          occurredAt: new Date('2026-06-01T12:00:00Z'),
+        },
+      ];
+      const getRates = vi.fn().mockResolvedValue([D(41.5), D(1), D('48.7341')]);
+      const { service, $transaction, $queryRaw } = buildService({
+        currency: { getRates },
         prisma: {
           space: {
             findUnique: vi
               .fn()
               .mockResolvedValue({ id: 's1', primaryCurrency: 'EUR' }),
-            update: vi
-              .fn()
-              .mockResolvedValue({ id: 's1', primaryCurrency: 'UAH' }),
           },
-          expense: {
-            findMany: vi.fn().mockResolvedValue([
-              {
-                id: 'e1',
-                amount: D(100),
-                walletCurrency: 'USD',
-                occurredAt: new Date('2026-06-01T10:00:00Z'),
-              },
-              {
-                id: 'e2',
-                amount: D(50),
-                walletCurrency: 'UAH',
-                occurredAt: new Date('2026-06-01T12:00:00Z'),
-              },
-              {
-                id: 'e3',
-                amount: D(20),
-                walletCurrency: 'USD',
-                occurredAt: new Date('2026-06-01T15:00:00Z'),
-              },
-            ]),
-          },
+          expense: { findMany: vi.fn().mockResolvedValue(expenses) },
           category: {
             findMany: vi.fn().mockResolvedValue([
               { id: 'c1', monthlyLimit: D(100) },
@@ -309,45 +308,88 @@ describe('SpacesService', () => {
           },
         },
       });
+      $queryRaw.mockResolvedValue([{ id: 's1', primaryCurrency: 'UAH' }]);
 
       const result = await service.updateSpace('s1', {
         primaryCurrency: 'UAH',
       });
 
       expect(result).toEqual({ id: 's1', primaryCurrency: 'UAH' });
-      // One lookup per (currency, Kyiv day): e1 and e3 share USD on 01.06.
-      const usdCalls = getRate.mock.calls.filter(([from]) => from === 'USD');
-      expect(usdCalls).toHaveLength(1);
+      // One batched lookup: each transaction at its own date, limits today.
+      expect(getRates).toHaveBeenCalledTimes(1);
+      expect(getRates).toHaveBeenCalledWith([
+        { from: 'USD', to: 'UAH', date: expenses[0].occurredAt },
+        { from: 'UAH', to: 'UAH', date: expenses[1].occurredAt },
+        { from: 'EUR', to: 'UAH', date: expect.any(Date) as Date },
+      ]);
 
-      const expenseUpdates = prisma.expense.update.mock.calls.map(
-        ([arg]) =>
-          arg as {
-            where: { id: string };
-            data: { fxRate: Prisma.Decimal; amountInPrimary: Prisma.Decimal };
+      // Everything is written by a single statement (atomic, one round
+      // trip): (id, rate) pairs for expenses, then limits — 100 EUR *
+      // 48.7341 = 4873.41 -> 4873; a tiny limit never becomes 0 — then the
+      // space itself (new currency, unchanged name, id).
+      expect($queryRaw).toHaveBeenCalledTimes(1);
+      const statement = $queryRaw.mock.calls[0] as unknown[];
+      const values = statement
+        .slice(1)
+        .flatMap((part) =>
+          part && typeof part === 'object' && 'values' in part
+            ? (part as { values: unknown[] }).values
+            : [part],
+        );
+      expect(values).toEqual([
+        'e1',
+        '41.5',
+        'e2',
+        '1',
+        'c1',
+        '4873',
+        'c2',
+        '1',
+        'UAH',
+        null,
+        's1',
+      ]);
+      expect($transaction).not.toHaveBeenCalled();
+    });
+
+    it('falls back to chunked updates in a transaction for huge spaces', async () => {
+      const many = Array.from({ length: 30_001 }, (_, i) => ({
+        id: `e${i}`,
+        amount: D(1),
+        walletCurrency: 'USD',
+        occurredAt: new Date('2026-06-01T10:00:00Z'),
+      }));
+      const { service, prisma, $transaction, $executeRaw, $queryRaw } =
+        buildService({
+          currency: {
+            getRates: vi.fn().mockResolvedValue(many.map(() => D(2))),
           },
-      );
-      const byId = Object.fromEntries(
-        expenseUpdates.map((u) => [u.where.id, u.data]),
-      );
-      expect(byId.e1.amountInPrimary.toNumber()).toBe(4150);
-      expect(byId.e1.fxRate.toNumber()).toBe(41.5);
-      expect(byId.e2.amountInPrimary.toNumber()).toBe(50);
-      expect(byId.e3.amountInPrimary.toNumber()).toBe(830);
+          prisma: {
+            space: {
+              findUnique: vi
+                .fn()
+                .mockResolvedValue({ id: 's1', primaryCurrency: 'EUR' }),
+              update: vi
+                .fn()
+                .mockResolvedValue({ id: 's1', primaryCurrency: 'UAH' }),
+            },
+            expense: { findMany: vi.fn().mockResolvedValue(many) },
+            category: { findMany: vi.fn().mockResolvedValue([]) },
+          },
+        });
 
-      // 100 EUR * 48.7341 = 4873.41 -> 4873; a tiny limit never becomes 0.
-      expect(prisma.category.update).toHaveBeenCalledWith({
-        where: { id: 'c1' },
-        data: { monthlyLimit: D(4873) },
+      const result = await service.updateSpace('s1', {
+        primaryCurrency: 'UAH',
       });
-      expect(prisma.category.update).toHaveBeenCalledWith({
-        where: { id: 'c2' },
-        data: { monthlyLimit: D(1) },
-      });
+
+      expect(result).toEqual({ id: 's1', primaryCurrency: 'UAH' });
+      expect($queryRaw).not.toHaveBeenCalled();
+      expect($executeRaw).toHaveBeenCalledTimes(4); // 10k-row chunks
+      expect($transaction).toHaveBeenCalledTimes(1);
       expect(prisma.space.update).toHaveBeenCalledWith({
         where: { id: 's1' },
         data: { primaryCurrency: 'UAH' },
       });
-      expect($transaction).toHaveBeenCalledTimes(1);
     });
 
     it('just updates the space when the currency is not changing', async () => {
@@ -364,7 +406,7 @@ describe('SpacesService', () => {
 
       await service.updateSpace('s1', { name: 'Home', primaryCurrency: 'EUR' });
 
-      expect(currency.getRate).not.toHaveBeenCalled();
+      expect(currency.getRates).not.toHaveBeenCalled();
       expect($transaction).not.toHaveBeenCalled();
       expect(prisma.space.update).toHaveBeenCalledWith({
         where: { id: 's1' },
@@ -378,32 +420,35 @@ describe('SpacesService', () => {
         HttpStatus.SERVICE_UNAVAILABLE,
         'Exchange rate unavailable',
       );
-      const { service, prisma, $transaction } = buildService({
-        currency: { getRate: vi.fn().mockRejectedValue(unavailable) },
-        prisma: {
-          space: {
-            findUnique: vi
-              .fn()
-              .mockResolvedValue({ id: 's1', primaryCurrency: 'EUR' }),
+      const { service, prisma, $transaction, $executeRaw, $queryRaw } =
+        buildService({
+          currency: { getRates: vi.fn().mockRejectedValue(unavailable) },
+          prisma: {
+            space: {
+              findUnique: vi
+                .fn()
+                .mockResolvedValue({ id: 's1', primaryCurrency: 'EUR' }),
+            },
+            expense: {
+              findMany: vi.fn().mockResolvedValue([
+                {
+                  id: 'e1',
+                  amount: D(100),
+                  walletCurrency: 'USD',
+                  occurredAt: new Date('2026-06-01T10:00:00Z'),
+                },
+              ]),
+            },
+            category: { findMany: vi.fn().mockResolvedValue([]) },
           },
-          expense: {
-            findMany: vi.fn().mockResolvedValue([
-              {
-                id: 'e1',
-                amount: D(100),
-                walletCurrency: 'USD',
-                occurredAt: new Date('2026-06-01T10:00:00Z'),
-              },
-            ]),
-          },
-        },
-      });
+        });
 
       await expect(
         service.updateSpace('s1', { primaryCurrency: 'UAH' }),
       ).rejects.toBe(unavailable);
       expect($transaction).not.toHaveBeenCalled();
-      expect(prisma.expense.update).not.toHaveBeenCalled();
+      expect($executeRaw).not.toHaveBeenCalled();
+      expect($queryRaw).not.toHaveBeenCalled();
       expect(prisma.space.update).not.toHaveBeenCalled();
     });
   });
