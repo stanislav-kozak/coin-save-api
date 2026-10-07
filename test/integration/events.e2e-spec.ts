@@ -136,25 +136,51 @@ describe('Events flow (integration)', () => {
       .expect(201);
     const spaceId = spaceRes.body.id as string;
 
-    // (a) invalid token gets disconnected
-    const badSocket = io(baseUrl, { auth: { token: 'not-a-real-token' } });
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error('expected disconnect on bad token')),
-        5000,
-      );
-      badSocket.once('disconnect', () => {
-        clearTimeout(timer);
-        resolve();
+    // (a) bad, missing or cross-site handshakes are refused with a
+    // recoverable connect_error (not a server-side disconnect).
+    const connectError = (socket: ReturnType<typeof io>) =>
+      new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('expected connect_error')),
+          5000,
+        );
+        socket.once('connect_error', (err: Error) => {
+          clearTimeout(timer);
+          socket.close();
+          resolve(err.message);
+        });
       });
-    });
-    badSocket.close();
+    expect(
+      await connectError(io(baseUrl, { auth: { token: 'not-a-real-token' } })),
+    ).toBe('UNAUTHORIZED');
+    expect(await connectError(io(baseUrl, { reconnection: false }))).toBe(
+      'UNAUTHORIZED',
+    );
+    expect(
+      await connectError(
+        io(baseUrl, {
+          reconnection: false,
+          extraHeaders: {
+            cookie: `access=${memberToken}`,
+            origin: 'https://evil.example',
+          },
+        }),
+      ),
+    ).toBe('FORBIDDEN_ORIGIN');
 
-    // (b) member subscribes and receives wallet.changed
-    const memberSocket = io(baseUrl, { auth: { token: memberToken } });
+    // (b) a browser-like member authenticates with the httpOnly access
+    // cookie on the same origin, gets an ack and receives wallet.changed.
+    const memberSocket = io(baseUrl, {
+      extraHeaders: {
+        cookie: `session=1; access=${memberToken}`,
+        origin: new URL(process.env.FRONTEND_URL!).origin,
+      },
+    });
     await new Promise<void>((resolve) => memberSocket.on('connect', resolve));
-    memberSocket.emit('space.subscribe', { spaceId });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    const memberAck = (await memberSocket.emitWithAck('space.subscribe', {
+      spaceId,
+    })) as unknown;
+    expect(memberAck).toEqual({ ok: true });
 
     const eventPromise = waitForEvent<{ spaceId: string; actorId: string }>(
       memberSocket,
@@ -170,12 +196,14 @@ describe('Events flow (integration)', () => {
     expect(payload).toEqual({ spaceId, actorId: expect.any(String) as string });
     memberSocket.close();
 
-    // (c) an outsider who is not a member of the space never receives it,
-    // even after subscribing (the gateway silently refuses to join them).
+    // (c) an outsider who is not a member of the space is told so and never
+    // receives the space's events (non-browser client: auth.token).
     const outsiderSocket = io(baseUrl, { auth: { token: outsiderToken } });
     await new Promise<void>((resolve) => outsiderSocket.on('connect', resolve));
-    outsiderSocket.emit('space.subscribe', { spaceId });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    const outsiderAck = (await outsiderSocket.emitWithAck('space.subscribe', {
+      spaceId,
+    })) as unknown;
+    expect(outsiderAck).toEqual({ ok: false, code: 'FORBIDDEN_NOT_MEMBER' });
 
     const noEventPromise = waitForNoEvent(outsiderSocket, 'wallet.changed');
 
