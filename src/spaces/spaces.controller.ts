@@ -73,6 +73,7 @@ export class SpacesController {
     'FORBIDDEN_NOT_MEMBER',
     'FORBIDDEN_NOT_OWNER',
   )
+  @ApiErrorResponse(HttpStatus.SERVICE_UNAVAILABLE, 'CURRENCY_API_UNAVAILABLE')
   @ApiOkResponse({ type: SpaceResponseDto })
   @UseGuards(SpaceOwnerGuard)
   async update(
@@ -82,6 +83,11 @@ export class SpacesController {
   ) {
     const space = await this.spacesService.updateSpace(spaceId, dto);
     this.events.emitToSpace(spaceId, 'space.changed', user.id);
+    if (dto.primaryCurrency) {
+      // Amounts in the primary currency and category limits were rewritten.
+      this.events.emitToSpace(spaceId, 'expense.changed', user.id);
+      this.events.emitToSpace(spaceId, 'category.changed', user.id);
+    }
     return space;
   }
 
