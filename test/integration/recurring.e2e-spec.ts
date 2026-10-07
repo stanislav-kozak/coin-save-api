@@ -275,8 +275,11 @@ describe('Recurring flow (integration)', () => {
 
     const generatorService = app.get(RecurringGeneratorService);
     await generatorService.generateForRecurring(recurringId, new Date());
+    // No back-fill: nothing before today (today's own due date, on the 5th,
+    // would legitimately be generated).
+    const startOfTodayUtc = new Date(new Date().toISOString().slice(0, 10));
     const backfilledExpenses = await prisma.expense.findMany({
-      where: { recurringId },
+      where: { recurringId, occurredAt: { lt: startOfTodayUtc } },
     });
     expect(backfilledExpenses).toEqual([]);
 
@@ -335,5 +338,62 @@ describe('Recurring flow (integration)', () => {
       .get(`/api/spaces/${spaceId}/recurring/${recurringId}`)
       .expect(404);
     expect(notFoundRes.body.code).toBe('RECURRING_NOT_FOUND');
+  });
+
+  it("generates today's payment for a rule created this month and after pause/resume", async () => {
+    const agent = createCookieAgent(app);
+    const email = 'resume@example.com';
+    const password = 'super-secret-1';
+    await agent.post('/api/auth/signup').send({ email, password }).expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await agent
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+    await agent.post('/api/auth/login').send({ email, password }).expect(200);
+    const spaceId = (
+      await agent.post('/api/spaces').send({ name: 'Resume' }).expect(201)
+    ).body.id as string;
+    const walletId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/wallets`)
+        .send({ name: 'Cash', currency: 'EUR', initialBalance: 0 })
+        .expect(201)
+    ).body.id as string;
+
+    // Due today (any date the suite runs on), started at the month's start.
+    const now = new Date();
+    const today = now.toISOString().slice(0, 10);
+    const recurringId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/recurring`)
+        .send({
+          walletId,
+          type: TransactionType.EXPENSE,
+          amount: 15.99,
+          name: 'Netflix',
+          frequency: RecurringFrequency.MONTHLY,
+          dayOfMonth: now.getUTCDate(),
+          startDate: `${today.slice(0, 8)}01T00:00:00.000Z`,
+        })
+        .expect(201)
+    ).body.id as string;
+
+    await agent
+      .patch(`/api/spaces/${spaceId}/recurring/${recurringId}/pause`)
+      .expect(200);
+    await agent
+      .patch(`/api/spaces/${spaceId}/recurring/${recurringId}/resume`)
+      .expect(200);
+
+    await app
+      .get(RecurringGeneratorService)
+      .generateForRecurring(recurringId, new Date());
+
+    const generated = await prisma.expense.findMany({ where: { recurringId } });
+    expect(generated).toHaveLength(1);
+    expect(generated[0].occurredAt.toISOString().slice(0, 10)).toBe(today);
   });
 });

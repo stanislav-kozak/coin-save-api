@@ -5,6 +5,7 @@ import type {
   TransactionType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { lastDueDateBefore } from './recurring-due-dates';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 
@@ -55,9 +56,17 @@ export class RecurringService {
       );
     }
 
+    // Don't back-fill due dates that are already past, but keep this
+    // month's upcoming one (see lastDueDateBefore).
     const now = new Date();
     const lastGeneratedAt =
-      startDate.getTime() <= now.getTime() ? now : undefined;
+      startDate.getTime() <= now.getTime()
+        ? (lastDueDateBefore({
+            startDate,
+            dayOfMonth: input.dayOfMonth,
+            before: now,
+          }) ?? undefined)
+        : undefined;
 
     return this.prisma.recurringTransaction.create({
       data: {
@@ -151,11 +160,28 @@ export class RecurringService {
     return this.setActive(spaceId, id, false);
   }
 
-  resumeRecurringTransaction(
+  async resumeRecurringTransaction(
     spaceId: string,
     id: string,
   ): Promise<RecurringTransaction> {
-    return this.setActive(spaceId, id, true, new Date());
+    // Payments that fell due while paused are not back-filled; upcoming
+    // ones, including later this month, are generated as usual.
+    const recurring = await this.findRecurringOrThrow(spaceId, id);
+    const skipUntil = lastDueDateBefore({
+      startDate: recurring.startDate,
+      dayOfMonth: recurring.dayOfMonth,
+      before: new Date(),
+    });
+    const advances =
+      skipUntil &&
+      (!recurring.lastGeneratedAt ||
+        skipUntil.getTime() > recurring.lastGeneratedAt.getTime());
+    return this.prisma.recurringTransaction.update({
+      where: { id },
+      data: advances
+        ? { active: true, lastGeneratedAt: skipUntil }
+        : { active: true },
+    });
   }
 
   async deleteRecurringTransaction(spaceId: string, id: string): Promise<void> {
@@ -167,12 +193,11 @@ export class RecurringService {
     spaceId: string,
     id: string,
     active: boolean,
-    lastGeneratedAt?: Date,
   ): Promise<RecurringTransaction> {
     await this.findRecurringOrThrow(spaceId, id);
     return this.prisma.recurringTransaction.update({
       where: { id },
-      data: lastGeneratedAt ? { active, lastGeneratedAt } : { active },
+      data: { active },
     });
   }
 
