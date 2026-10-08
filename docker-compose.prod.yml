@@ -21,6 +21,48 @@ services:
     expose:
       - "3000"
 
+  # Postgres next to the API: ~1 ms per query instead of ~100 ms to a remote
+  # database, and no cold starts. Not published to the host; data lives in
+  # the pg-data volume. The API reaches it as DATABASE_URL=...@db:5432/coinsave.
+  # POSTGRES_PASSWORD comes from .env (GitHub settings; the deploy refuses to
+  # run without it). Not `:?` here: that would break every compose command,
+  # e.g. a frontend deploy, until the backend deploy has written it.
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: coinsave
+      POSTGRES_DB: coinsave
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "coinsave", "-d", "coinsave"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Nightly pg_dump to the db-backups volume (7 kept) and, when BACKUP_S3_*
+  # is set, off-site (e.g. Cloudflare R2). See DEPLOYMENT.md.
+  db-backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/scripts/backup-entrypoint.sh"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      RCLONE_CONFIG_OFFSITE_TYPE: s3
+      RCLONE_CONFIG_OFFSITE_PROVIDER: ${BACKUP_S3_PROVIDER:-Cloudflare}
+      RCLONE_CONFIG_OFFSITE_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_OFFSITE_NO_CHECK_BUCKET: "true"
+    volumes:
+      - ./scripts/db:/scripts:ro
+      - db-backups:/backups
+    depends_on:
+      - db
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -41,3 +83,5 @@ services:
 volumes:
   caddy-data:
   caddy-config:
+  pg-data:
+  db-backups:

@@ -38,6 +38,23 @@ git pull --ff-only origin main
 echo "==> Pulling $SERVICE image tag: $TAG"
 $COMPOSE pull "$SERVICE"
 
+if [ "$SERVICE" = api ]; then
+  # The database (and its backups) must be up before the API migrates and
+  # starts; a no-op when they're already running unchanged.
+  echo "==> Ensuring the database is up"
+  $COMPOSE up -d --no-build db db-backup
+  for i in $(seq 1 30); do
+    if $COMPOSE exec -T db pg_isready -U coinsave -d coinsave >/dev/null 2>&1; then
+      break
+    fi
+    if [ "$i" = 30 ]; then
+      echo "!! database did not become ready" >&2
+      exit 1
+    fi
+    sleep 2
+  done
+fi
+
 echo "==> Restarting $SERVICE (and Caddy if needed)"
 # --no-deps: never recreate the other app as a side effect (e.g. a frontend
 # deploy must not move the API off a pinned rollback tag).

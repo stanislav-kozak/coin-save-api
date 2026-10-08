@@ -62,7 +62,13 @@ variables → Actions); рекомендуємо тримати все в `produ
 
 | Тип | Назва | Обов'язково | Що це / приклад |
 |---|---|---|---|
-| Secret | `DATABASE_URL` | так | Рядок підключення Neon: `postgresql://user:pass@host/db?sslmode=require` |
+| Secret | `DATABASE_URL` | так | База на VPS: `postgresql://coinsave:<POSTGRES_PASSWORD>@db:5432/coinsave` (до переїзду — рядок Neon) |
+| Secret | `POSTGRES_PASSWORD` | так | Пароль бази на VPS, лише `openssl rand -hex 24` (hex безпечний для URL) |
+| Secret | `BACKUP_S3_SECRET_ACCESS_KEY` | ні* | Ключ сховища для бекапів (див. «База даних») |
+| Variable | `BACKUP_S3_BUCKET` | ні* | Назва бакета, напр. `coinsave-backups` |
+| Variable | `BACKUP_S3_ENDPOINT` | ні* | R2: `https://<account-id>.r2.cloudflarestorage.com` |
+| Variable | `BACKUP_S3_ACCESS_KEY_ID` | ні* | Access Key ID токена сховища |
+| Variable | `BACKUP_S3_PROVIDER` | ні | rclone-провайдер, за замовчуванням `Cloudflare` |
 | Secret | `JWT_ACCESS_SECRET` | так | Довгий випадковий рядок: `openssl rand -hex 32` |
 | Secret | `JWT_REFRESH_SECRET` | так | Інший довгий випадковий рядок: `openssl rand -hex 32` |
 | Secret | `GOOGLE_CLIENT_SECRET` | так | Google Cloud Console → Credentials → OAuth client |
@@ -147,6 +153,56 @@ ssh-keygen -t ed25519 -f coinsave-deploy -N "" -C "github-actions-deploy"
 - образ у GHCR приватний: CI логіниться в реєстр сам на час деплою, на VPS
   нічого зберігати не треба.
 
+## База даних (Postgres на VPS)
+
+Сервіс `db` (Postgres 17) у `docker-compose.prod.yml`: поруч з API, тож
+запит до бази коштує <1 мс замість ~100 мс до Neon, і бази, що «засинає»,
+більше немає. Порт назовні не відкритий, дані лежать у томі `pg-data`.
+
+\* **Бекапи.** Сервіс `db-backup` робить `pg_dump` щоночі о 01:00 UTC і
+одразу при старті. Локально в томі `db-backups` зберігаються 7 останніх
+дампів. Якщо задано `BACKUP_S3_*`, кожен дамп копіюється в S3-сумісне
+сховище; копії, старші за 30 днів, видаляються. Без цього бекапи лежать
+**тільки на самому VPS**: загине VPS — загинуть і вони. Тому зовнішнє
+сховище наполегливо рекомендоване. Як налаштувати Cloudflare R2
+(безкоштовно до 10 ГБ):
+
+1. Cloudflare → R2 → Create bucket `coinsave-backups`.
+2. R2 → Manage API tokens → Create token з правом **Object Read & Write**
+   на цей бакет. Звідти взяти Access Key ID, Secret Access Key і endpoint.
+3. Задати `BACKUP_S3_*` у GitHub (таблиця вище) і запустити Run workflow.
+4. Перевірити:
+   `docker compose -f docker-compose.prod.yml logs db-backup | grep backup:`
+   має бути `backup: copied to offsite:coinsave-backups`.
+
+**Відновлення з бекапу** (API на час відновлення зупиняється):
+
+```bash
+cd <VPS_APP_DIR>
+./scripts/db/restore.sh                                  # список дампів
+./scripts/db/restore.sh coinsave-2026-10-08T010000Z.dump # відновити
+```
+
+Щоб відновити з копії в R2, спершу покладіть файл у том
+(`docker compose -f docker-compose.prod.yml cp <file> db-backup:/backups/`).
+
+### Переїзд з Neon (одноразово)
+
+1. GitHub: задати `POSTGRES_PASSWORD`, а за бажанням і `BACKUP_S3_*`.
+   `DATABASE_URL` поки **не міняти**: API ще працює з Neon.
+2. Змерджити PR із базою. Деплой підніме порожню `db` і `db-backup`.
+3. На VPS у тихий час (усе, що запишуть у Neon після дампу, не переїде):
+   ```bash
+   cd <VPS_APP_DIR>
+   ./scripts/db/import-from-neon.sh '<рядок підключення Neon>'
+   ```
+   Скрипт порівнює кількість рядків у Neon і на VPS; вони мають збігтися.
+4. GitHub: `DATABASE_URL` =
+   `postgresql://coinsave:<POSTGRES_PASSWORD>@db:5432/coinsave`
+   → Actions → CI/CD → Run workflow.
+5. Перевірити застосунок. Neon не видаляти 1–2 тижні: це запасний варіант
+   (повернення: старий `DATABASE_URL` → Run workflow).
+
 ## Фронтенд (репо coin-save-app)
 
 Його CI збирає `ghcr.io/stanislav-kozak/coin-save-app:{main,<sha>}` і
@@ -225,6 +281,7 @@ cp .env.bak .env && docker compose -f docker-compose.prod.yml up -d
 ```bash
 docker compose -f docker-compose.prod.yml ps
 docker compose -f docker-compose.prod.yml logs --tail=100 api   # 5xx-помилки логуються тут
+docker compose -f docker-compose.prod.yml logs db-backup | grep backup:   # останні бекапи
 docker compose -f docker-compose.prod.yml exec -T api wget -qO- http://localhost:3000/api/health  # напряму в API
 curl -s https://app.coinsavekeeper.com/api/health                                             # через Caddy і HTTPS
 docker compose -f docker-compose.prod.yml logs --tail=50 caddy   # проблеми з сертифікатом видно тут
