@@ -339,4 +339,65 @@ describe('Auth flow (integration)', () => {
     const rejectedCookies = res.headers['set-cookie'] as unknown as string[];
     expect(rejectedCookies.some((c) => c.startsWith('session=;'))).toBe(true);
   });
+
+  it('lets the signed-in user edit their name and language via PATCH /api/users/me', async () => {
+    const email = 'profile@example.com';
+    const password = 'super-secret-1';
+    await request(app.getHttpServer())
+      .post('/api/auth/signup')
+      .send({ email, password })
+      .expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await request(app.getHttpServer())
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+    const login = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email, password })
+      .expect(200);
+    const cookies = login.headers['set-cookie'] as unknown as string[];
+    const patchMe = (body: object) =>
+      request(app.getHttpServer())
+        .patch('/api/users/me')
+        .set('Cookie', cookies)
+        .send(body);
+
+    const updated = await patchMe({ name: '  Olena  ', locale: 'en' }).expect(
+      200,
+    );
+    expect(updated.body).toMatchObject({
+      email,
+      name: 'Olena',
+      locale: 'en',
+    });
+    expect(updated.body).not.toHaveProperty('passwordHash');
+
+    const me = await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Cookie', cookies)
+      .expect(200);
+    expect(me.body).toMatchObject({ name: 'Olena', locale: 'en' });
+
+    // null clears the name; omitted fields stay as they are.
+    const cleared = await patchMe({ name: null }).expect(200);
+    expect(cleared.body).toMatchObject({ name: null, locale: 'en' });
+
+    for (const invalid of [
+      { locale: 'de' },
+      { locale: null },
+      { name: '   ' },
+      { name: 'x'.repeat(101) },
+    ]) {
+      const res = await patchMe(invalid).expect(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+    }
+
+    await request(app.getHttpServer())
+      .patch('/api/users/me')
+      .send({ name: 'Nobody' })
+      .expect(401);
+  });
 });
