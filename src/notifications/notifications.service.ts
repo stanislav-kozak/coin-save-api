@@ -91,7 +91,7 @@ export class NotificationService {
       return;
     }
 
-    const locale = recurring.createdBy.locale === 'en' ? 'en' : 'uk';
+    const locale = recurring.createdBy.locale === 'uk' ? 'uk' : 'en';
     const occurrenceDate = new Intl.DateTimeFormat(
       locale === 'en' ? 'en-US' : 'uk-UA',
       { day: 'numeric', month: 'long' },
@@ -101,7 +101,6 @@ export class NotificationService {
       recurring.createdBy.email,
       locale,
       'recurring-reminder',
-      locale === 'en' ? 'Upcoming payment reminder' : 'Нагадування про платіж',
       {
         walletIcon: recurring.wallet.icon ?? '',
         walletName: recurring.wallet.name,

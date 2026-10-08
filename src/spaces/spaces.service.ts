@@ -97,7 +97,7 @@ export class SpacesService {
   async createSpace(ownerId: string, name: string): Promise<Space> {
     const slug = await this.generateUniqueSlug(name);
     const owner = await this.prisma.user.findUnique({ where: { id: ownerId } });
-    const locale = owner?.locale === 'en' ? 'en' : 'uk';
+    const locale = owner?.locale === 'uk' ? 'uk' : 'en';
 
     const space = await this.prisma.space.create({
       data: {
@@ -342,20 +342,13 @@ export class SpacesService {
       },
     });
 
-    const locale = existingUser?.locale === 'en' ? 'en' : 'uk';
-    await this.mail.send(
-      email,
-      locale,
-      'invitation',
-      locale === 'en'
-        ? "You've been invited to CoinSave"
-        : 'Запрошення до CoinSave',
-      {
-        spaceName: space.name,
-        inviterName: inviter?.name ?? inviter?.email ?? 'CoinSave',
-        acceptUrl: `${this.config.get<string>('FRONTEND_URL')}/invitations/accept?token=${token}`,
-      },
-    );
+    // Invitees without an account get English.
+    const locale = existingUser?.locale === 'uk' ? 'uk' : 'en';
+    await this.mail.send(email, locale, 'invitation', {
+      spaceName: space.name,
+      inviterName: inviter?.name ?? inviter?.email ?? 'CoinSaveKeeper',
+      acceptUrl: `${this.config.get<string>('FRONTEND_URL')}/invitations/accept?token=${token}`,
+    });
   }
 
   async listInvitations(spaceId: string): Promise<InvitationView[]> {

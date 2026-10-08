@@ -16,7 +16,7 @@ model User {
   passwordHash  String?
   name          String?
   avatarUrl     String?
-  locale        String    @default("uk")
+  locale        String    @default("en") // email language; "en" for new users since 2026-10-08
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

@@ -87,16 +87,41 @@ describe('AuthService', () => {
       'a@b.com',
       expect.any(String),
       undefined,
+      'en', // default account/email language
     );
     expect(prisma.emailVerificationToken.create).toHaveBeenCalledTimes(1);
     expect(mail.send).toHaveBeenCalledWith(
       'a@b.com',
       'uk',
       'verify-email',
-      expect.any(String),
       expect.objectContaining({
         verifyUrl: expect.stringContaining('/verify-email?token='),
       }),
+    );
+  });
+
+  it('stores the UI language chosen at signup as the account language', async () => {
+    const created = { id: 'u1', email: 'a@b.com', locale: 'uk' };
+    const { service, users, mail } = buildService({
+      users: {
+        findByEmail: vi.fn().mockResolvedValue(null),
+        createLocal: vi.fn().mockResolvedValue(created),
+      },
+    });
+
+    await service.signup('a@b.com', 'password123', undefined, 'uk');
+
+    expect(users.createLocal).toHaveBeenCalledWith(
+      'a@b.com',
+      expect.any(String),
+      undefined,
+      'uk',
+    );
+    expect(mail.send).toHaveBeenCalledWith(
+      'a@b.com',
+      'uk',
+      'verify-email',
+      expect.any(Object),
     );
   });
 
@@ -115,6 +140,7 @@ describe('AuthService', () => {
       'a@b.com',
       expect.any(String),
       'Olena',
+      'en',
     );
   });
 
@@ -260,7 +286,6 @@ describe('AuthService', () => {
       'a@b.com',
       'en',
       'verify-email',
-      expect.any(String),
       expect.objectContaining({
         verifyUrl: expect.stringContaining('/verify-email?token='),
       }),
@@ -306,6 +331,7 @@ describe('AuthService', () => {
       'olena@b.com',
       expect.any(String),
       undefined,
+      'en',
     );
   });
 

@@ -93,7 +93,6 @@ describe('NotificationService', () => {
       'user@example.com',
       'uk',
       'recurring-reminder',
-      'Нагадування про платіж',
       {
         walletIcon: '💳',
         walletName: 'Моно',
@@ -168,14 +167,14 @@ describe('NotificationService', () => {
     expect(mail.send).not.toHaveBeenCalled();
   });
 
-  it('resolves a non-en locale to uk', async () => {
+  it('writes in English unless the user chose Ukrainian', async () => {
     const { service, mail } = buildService({
       prisma: {
         recurringTransaction: {
           findMany: vi.fn().mockResolvedValue([
             {
               ...baseRecurring,
-              createdBy: { email: 'en-user@example.com', locale: 'en' },
+              createdBy: { email: 'en-user@example.com', locale: 'de' },
             },
           ]),
         },
@@ -188,7 +187,6 @@ describe('NotificationService', () => {
       'en-user@example.com',
       'en',
       'recurring-reminder',
-      'Upcoming payment reminder',
       expect.any(Object),
     );
   });
@@ -219,7 +217,6 @@ describe('NotificationService', () => {
       'second@example.com',
       'uk',
       'recurring-reminder',
-      'Нагадування про платіж',
       expect.any(Object),
     );
   });

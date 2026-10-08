@@ -15,7 +15,11 @@ import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 describe('Auth flow (integration)', () => {
   let container: StartedPostgreSqlContainer;
   let app: INestApplication;
-  const capturedEmails: { to: string; vars: Record<string, string> }[] = [];
+  const capturedEmails: {
+    to: string;
+    locale?: string;
+    vars: Record<string, string>;
+  }[] = [];
   const failingRecipients = new Set<string>();
 
   beforeAll(async () => {
@@ -43,15 +47,14 @@ describe('Auth flow (integration)', () => {
       .useValue({
         send: (
           to: string,
-          _locale: string,
+          locale: string,
           _template: string,
-          _subject: string,
           vars: Record<string, string>,
         ): Promise<void> => {
           if (failingRecipients.has(to)) {
             return Promise.reject(new Error('450 domain is not verified'));
           }
-          capturedEmails.push({ to, vars });
+          capturedEmails.push({ to, locale, vars });
           return Promise.resolve();
         },
       })
@@ -399,5 +402,40 @@ describe('Auth flow (integration)', () => {
       .patch('/api/users/me')
       .send({ name: 'Nobody' })
       .expect(401);
+  });
+
+  it('makes English the default account language and keeps the one chosen at signup', async () => {
+    const password = 'super-secret-1';
+    const signUp = async (email: string, locale?: string) => {
+      await request(app.getHttpServer())
+        .post('/api/auth/signup')
+        .send({ email, password, ...(locale ? { locale } : {}) })
+        .expect(201);
+      const sent = capturedEmails.find((e) => e.to === email)!;
+      await request(app.getHttpServer())
+        .post('/api/auth/verify-email')
+        .send({
+          token: new URL(sent.vars.verifyUrl).searchParams.get('token'),
+        })
+        .expect(200);
+      const login = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email, password })
+        .expect(200);
+      const me = await request(app.getHttpServer())
+        .get('/api/auth/me')
+        .set('Cookie', login.headers['set-cookie'] as unknown as string[])
+        .expect(200);
+      return { emailLocale: sent.locale, accountLocale: me.body.locale };
+    };
+
+    expect(await signUp('default-lang@example.com')).toEqual({
+      emailLocale: 'en',
+      accountLocale: 'en',
+    });
+    expect(await signUp('ukrainian@example.com', 'uk')).toEqual({
+      emailLocale: 'uk',
+      accountLocale: 'uk',
+    });
   });
 });

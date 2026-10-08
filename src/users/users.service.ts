@@ -46,8 +46,11 @@ export class UsersService {
     email: string,
     passwordHash: string,
     name?: string,
+    locale?: string,
   ): Promise<User> {
-    return this.prisma.user.create({ data: { email, passwordHash, name } });
+    return this.prisma.user.create({
+      data: { email, passwordHash, name, locale },
+    });
   }
 
   updateProfile(
