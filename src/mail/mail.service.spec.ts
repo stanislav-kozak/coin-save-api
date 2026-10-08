@@ -87,6 +87,10 @@ describe('MailService', () => {
         expect(mail.html).not.toContain('fonts.googleapis.com');
         expect(mail.html).toContain('CoinSave');
         expect(mail.html).toContain('KEEPER');
+        // The brand mark served by the frontend, next to the text logo.
+        expect(mail.html).toContain(
+          'https://app.coinsavekeeper.com/apple-icon',
+        );
         expect(mail.html).toContain(
           locale === 'en' ? 'kept together' : 'сімейні витрати разом',
         ); // footer
