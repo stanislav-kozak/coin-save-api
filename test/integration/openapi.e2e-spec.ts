@@ -212,6 +212,23 @@ describe('OpenAPI contract (integration)', () => {
     expect(res.body.components.schemas.UserLocale.enum).toEqual(['uk', 'en']);
   });
 
+  it('documents GET /api/currencies/rate', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/docs.json')
+      .expect(200);
+    const op = res.body.paths['/api/currencies/rate'].get;
+
+    expect(op.responses['200'].content['application/json'].schema.$ref).toBe(
+      '#/components/schemas/CurrencyRateResponseDto',
+    );
+    expect(Object.keys(op.responses)).toEqual(
+      expect.arrayContaining(['400', '401', '503']),
+    );
+    const names = (op.parameters as { name: string }[]).map((p) => p.name);
+    expect(names).toEqual(expect.arrayContaining(['from', 'to']));
+    expect(res.body.components.schemas.Currency.enum).toContain('UAH');
+  });
+
   it('documents the error envelope with every API error code', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/docs.json')
