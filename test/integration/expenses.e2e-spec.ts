@@ -2,7 +2,7 @@ import { execSync } from 'child_process';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
-import { TransactionType } from '@prisma/client';
+import { RecurringFrequency, TransactionType } from '@prisma/client';
 import {
   PostgreSqlContainer,
   StartedPostgreSqlContainer,
@@ -376,5 +376,117 @@ describe('Expenses flow (integration)', () => {
       .get('/api/currencies/rate?from=XYZ&to=EUR')
       .expect(400);
     expect(unknown.body.code).toBe('VALIDATION_ERROR');
+  });
+
+  it("changes a wallet's currency, converting its amounts at today's rate", async () => {
+    // 1 EUR = 1.1 USD = 4.3 PLN, so 1 USD = 3.909090… PLN.
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({ frankfurter: frankfurterOk({ USD: 1.1, PLN: 4.3 }) }),
+    );
+    const agent = createCookieAgent(app);
+    const email = 'wallet-currency@example.com';
+    const password = 'super-secret-1';
+    await agent.post('/api/auth/signup').send({ email, password }).expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await agent
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+    await agent.post('/api/auth/login').send({ email, password }).expect(200);
+    const spaceId = (
+      await agent.post('/api/spaces').send({ name: 'W' }).expect(201)
+    ).body.id as string; // EUR
+    const walletId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/wallets`)
+        .send({ name: 'Dollars', currency: 'USD', initialBalance: 100 })
+        .expect(201)
+    ).body.id as string;
+    const expenseId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/expenses`)
+        .send({
+          walletId,
+          type: TransactionType.EXPENSE,
+          amount: 110,
+          occurredAt: '2026-06-10T12:00:00.000Z',
+        })
+        .expect(201)
+    ).body.id as string;
+    const recurringId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/recurring`)
+        .send({
+          walletId,
+          type: TransactionType.EXPENSE,
+          amount: 11,
+          name: 'Netflix',
+          frequency: RecurringFrequency.MONTHLY,
+          dayOfMonth: 15,
+          startDate: '2030-01-01T00:00:00.000Z',
+        })
+        .expect(201)
+    ).body.id as string;
+
+    // Currency and initialBalance together are ambiguous.
+    const both = await agent
+      .patch(`/api/spaces/${spaceId}/wallets/${walletId}`)
+      .send({ currency: 'PLN', initialBalance: 5 })
+      .expect(400);
+    expect(both.body.code).toBe('VALIDATION_ERROR');
+    await agent
+      .patch(`/api/spaces/${spaceId}/wallets/${walletId}`)
+      .send({ currency: 'XYZ' })
+      .expect(400);
+
+    const changed = await agent
+      .patch(`/api/spaces/${spaceId}/wallets/${walletId}`)
+      .send({ currency: 'PLN', name: 'Zloty' })
+      .expect(200);
+    expect(changed.body).toMatchObject({ currency: 'PLN', name: 'Zloty' });
+    expect(Number(changed.body.initialBalance)).toBeCloseTo(390.9091, 4);
+    // Balance converts exactly: (100 - 110) USD = -10 USD = -39.0909 PLN.
+    expect(Number(changed.body.balance)).toBeCloseTo(-39.0909, 3);
+
+    const expense = await agent
+      .get(`/api/spaces/${spaceId}/expenses/${expenseId}`)
+      .expect(200);
+    expect(expense.body.walletCurrency).toBe('PLN');
+    expect(Number(expense.body.amount)).toBeCloseTo(430, 4);
+    expect(Number(expense.body.amountInPrimary)).toBeCloseTo(100, 4); // EUR, unchanged
+    expect(
+      Number(expense.body.amount) * Number(expense.body.fxRate),
+    ).toBeCloseTo(100, 3);
+
+    const recurring = await agent
+      .get(`/api/spaces/${spaceId}/recurring/${recurringId}`)
+      .expect(200);
+    expect(recurring.body.currency).toBe('PLN');
+    expect(Number(recurring.body.amount)).toBeCloseTo(43, 4);
+
+    // No rate available (CHF never cached, provider down): nothing changes.
+    vi.stubGlobal('fetch', mockFetch({ frankfurter: failing() }));
+    const unavailable = await agent
+      .patch(`/api/spaces/${spaceId}/wallets/${walletId}`)
+      .send({ currency: 'CHF' })
+      .expect(503);
+    expect(unavailable.body.code).toBe('CURRENCY_API_UNAVAILABLE');
+    const after = await agent
+      .get(`/api/spaces/${spaceId}/wallets/${walletId}`)
+      .expect(200);
+    expect(after.body.currency).toBe('PLN');
+
+    // Archived wallets can't change currency.
+    await agent
+      .patch(`/api/spaces/${spaceId}/wallets/${walletId}/archive`)
+      .expect(200);
+    const archived = await agent
+      .patch(`/api/spaces/${spaceId}/wallets/${walletId}`)
+      .send({ currency: 'USD' })
+      .expect(409);
+    expect(archived.body.code).toBe('WALLET_ARCHIVED');
   });
 });
