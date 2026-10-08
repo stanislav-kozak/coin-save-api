@@ -67,7 +67,7 @@ describe('OpenAPI contract (integration)', () => {
       .expect(200);
 
     expect(res.body.openapi).toMatch(/^3\./);
-    expect(res.body.info.title).toBe('CoinSave API');
+    expect(res.body.info.title).toBe('CoinSaveKeeper API');
     expect(typeof res.body.paths).toBe('object');
     expect(Object.keys(res.body.paths).length).toBeGreaterThan(0);
     expect(res.body.paths['/api/auth/signup']).toBeDefined();

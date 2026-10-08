@@ -69,6 +69,7 @@ describe('AuthController', () => {
       'a@b.com',
       'password123',
       undefined,
+      undefined,
     );
   });
 
@@ -82,7 +83,26 @@ describe('AuthController', () => {
       'n@b.com',
       'password123',
       'Olena',
+      undefined,
     );
+  });
+
+  it('POST /auth/signup passes the UI language and rejects unsupported ones', async () => {
+    await request(app.getHttpServer())
+      .post('/auth/signup')
+      .send({ email: 'l@b.com', password: 'password123', locale: 'uk' })
+      .expect(201);
+    expect(authService.signup).toHaveBeenLastCalledWith(
+      'l@b.com',
+      'password123',
+      undefined,
+      'uk',
+    );
+
+    await request(app.getHttpServer())
+      .post('/auth/signup')
+      .send({ email: 'l@b.com', password: 'password123', locale: 'de' })
+      .expect(400);
   });
 
   it('POST /auth/signup rejects a blank or over-long name with 400', async () => {

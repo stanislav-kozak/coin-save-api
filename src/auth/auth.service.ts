@@ -37,6 +37,7 @@ export class AuthService {
     rawEmail: string,
     password: string,
     name?: string,
+    locale: 'en' | 'uk' = 'en',
   ): Promise<void> {
     const email = normalizeEmail(rawEmail);
     const existing = await this.users.findByEmail(email);
@@ -49,7 +50,12 @@ export class AuthService {
     }
 
     const passwordHash = await argon2.hash(password);
-    const user = await this.users.createLocal(email, passwordHash, name);
+    const user = await this.users.createLocal(
+      email,
+      passwordHash,
+      name,
+      locale,
+    );
     try {
       await this.sendVerificationEmail(user);
     } catch (error) {
@@ -81,16 +87,10 @@ export class AuthService {
       },
     });
 
-    const locale = user.locale === 'en' ? 'en' : 'uk';
-    await this.mail.send(
-      user.email,
-      locale,
-      'verify-email',
-      locale === 'en' ? 'Verify your email' : 'Підтвердіть вашу пошту',
-      {
-        verifyUrl: `${this.config.get<string>('FRONTEND_URL')}/verify-email?token=${token}`,
-      },
-    );
+    const locale = user.locale === 'uk' ? 'uk' : 'en';
+    await this.mail.send(user.email, locale, 'verify-email', {
+      verifyUrl: `${this.config.get<string>('FRONTEND_URL')}/verify-email?token=${token}`,
+    });
   }
 
   // Never reveals whether the email exists or is already verified.
@@ -259,16 +259,10 @@ export class AuthService {
       },
     });
 
-    const locale = user.locale === 'en' ? 'en' : 'uk';
-    await this.mail.send(
-      user.email,
-      locale,
-      'password-reset',
-      locale === 'en' ? 'Reset your password' : 'Скидання пароля',
-      {
-        resetUrl: `${this.config.get<string>('FRONTEND_URL')}/reset-password?token=${token}`,
-      },
-    );
+    const locale = user.locale === 'uk' ? 'uk' : 'en';
+    await this.mail.send(user.email, locale, 'password-reset', {
+      resetUrl: `${this.config.get<string>('FRONTEND_URL')}/reset-password?token=${token}`,
+    });
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {

@@ -1,12 +1,19 @@
-<mjml>
-  <mj-body>
-    <mj-section>
+<mjml lang="uk">
+  {{#*inline "title"}}Вас запрошено{{/inline}}
+  {{#*inline "preview"}}{{inviterName}} запрошує вас до «{{spaceName}}».{{/inline}}
+  {{> head}}
+  <mj-body background-color="#FAF7F4" width="560px">
+    {{> header}}
+    <mj-section background-color="#FFFFFF" border-radius="16px" border="1px solid #EDE7E1" padding="32px 28px 16px 28px">
       <mj-column>
-        <mj-text font-size="20px" font-weight="700">Запрошення до CoinSave</mj-text>
-        <mj-text>{{inviterName}} запросив(ла) вас приєднатися до простору "{{spaceName}}" у CoinSave.</mj-text>
-        <mj-button href="{{{acceptUrl}}}">Прийняти запрошення</mj-button>
-        <mj-text color="#78716C" font-size="13px">Якщо ви не очікували цей лист, просто проігноруйте його.</mj-text>
+        <mj-text font-size="22px" font-weight="700" line-height="1.3">{{inviterName}} запрошує вас до «{{spaceName}}»</mj-text>
+        <mj-text>Приєднуйтеся до простору в CoinSaveKeeper, щоб бачити спільні гаманці й бюджети та разом додавати витрати.</mj-text>
+        {{> button url=acceptUrl label="Прийняти запрошення" fallback="Якщо кнопка не працює, скопіюйте це посилання у браузер:"}}
+        <mj-text font-size="14px" color="#78716C" padding="0 0 16px 0">Запрошення діє 7 днів.</mj-text>
+        <mj-divider border-width="1px" border-color="#EDE7E1" padding="0 0 16px 0" />
+        <mj-text font-size="13px" color="#78716C">Не чекали на це запрошення? Просто проігноруйте лист.</mj-text>
       </mj-column>
     </mj-section>
+    {{> footer-uk}}
   </mj-body>
 </mjml>

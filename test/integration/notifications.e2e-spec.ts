@@ -63,7 +63,6 @@ describe('Notifications flow (integration)', () => {
           to: string,
           _locale: string,
           _template: string,
-          _subject: string,
           vars: Record<string, string>,
         ): Promise<void> => {
           capturedEmails.push({ to, vars });
