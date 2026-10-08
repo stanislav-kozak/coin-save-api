@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   ApiDateTimeProperty,
   ApiDecimalProperty,
+  ApiCurrencyProperty,
 } from '../../common/decorators/api-property.decorator';
 
 export class CategoryResponseDto {
@@ -22,9 +23,15 @@ export class CategoryResponseDto {
 
   @ApiDecimalProperty({
     nullable: true,
-    description: "In the space's primary currency",
+    description: 'In `currency`, or the space currency when that is null',
   })
   monthlyLimit!: string | null;
+
+  @ApiCurrencyProperty({
+    nullable: true,
+    description: 'Own budget currency; null follows the space',
+  })
+  currency!: string | null;
 
   @ApiProperty()
   archived!: boolean;

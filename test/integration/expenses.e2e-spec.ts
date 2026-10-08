@@ -489,4 +489,112 @@ describe('Expenses flow (integration)', () => {
       .expect(409);
     expect(archived.body.code).toBe('WALLET_ARCHIVED');
   });
+
+  it('supports categories with their own currency (limit, analytics, space change)', async () => {
+    // 1 EUR = 1.1 USD = 4.3 PLN.
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({ frankfurter: frankfurterOk({ USD: 1.1, PLN: 4.3 }) }),
+    );
+    const agent = createCookieAgent(app);
+    const email = 'category-currency@example.com';
+    const password = 'super-secret-1';
+    await agent.post('/api/auth/signup').send({ email, password }).expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await agent
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+    await agent.post('/api/auth/login').send({ email, password }).expect(200);
+    const spaceId = (
+      await agent.post('/api/spaces').send({ name: 'Trip' }).expect(201)
+    ).body.id as string; // EUR
+    const walletId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/wallets`)
+        .send({ name: 'Dollars', currency: 'USD', initialBalance: 0 })
+        .expect(201)
+    ).body.id as string;
+
+    // A trip budget in PLN, and a plain category following the space.
+    const trip = await agent
+      .post(`/api/spaces/${spaceId}/categories`)
+      .send({ name: 'Trip', currency: 'PLN', monthlyLimit: 860 })
+      .expect(201);
+    expect(trip.body.currency).toBe('PLN');
+    const tripId = trip.body.id as string;
+    const plain = await agent
+      .post(`/api/spaces/${spaceId}/categories`)
+      .send({ name: 'Plain', monthlyLimit: 100 })
+      .expect(201);
+    expect(plain.body.currency).toBeNull();
+    const plainId = plain.body.id as string;
+
+    await agent
+      .post(`/api/spaces/${spaceId}/expenses`)
+      .send({
+        walletId,
+        categoryId: tripId,
+        type: TransactionType.EXPENSE,
+        amount: 110, // USD = 100 EUR = 430 PLN
+        occurredAt: '2026-06-10T12:00:00.000Z',
+      })
+      .expect(201);
+
+    const analytics = await agent
+      .get(`/api/spaces/${spaceId}/analytics?from=2026-06-01&to=2026-06-30`)
+      .expect(200);
+    const tripRow = (
+      analytics.body.byCategory as Record<string, unknown>[]
+    ).find((c) => c.categoryId === tripId)!;
+    expect(tripRow.currency).toBe('PLN');
+    expect(Number(tripRow.spent)).toBeCloseTo(100, 2); // space currency
+    expect(Number(tripRow.spentInCurrency)).toBeCloseTo(430, 2);
+    expect(Number(tripRow.limit)).toBe(860);
+    expect(tripRow.pct).toBe(50);
+    const plainRow = (
+      analytics.body.byCategory as Record<string, unknown>[]
+    ).find((c) => c.categoryId === plainId)!;
+    expect(plainRow.currency).toBe('EUR');
+
+    // Changing the currency converts the limit at today's rate (whole units)…
+    const toUsd = await agent
+      .patch(`/api/spaces/${spaceId}/categories/${tripId}`)
+      .send({ currency: 'USD' })
+      .expect(200);
+    expect(toUsd.body.currency).toBe('USD');
+    expect(Number(toUsd.body.monthlyLimit)).toBe(220); // 860 PLN
+    // …unless a limit comes with it, taken as given in the new currency.
+    const toSpace = await agent
+      .patch(`/api/spaces/${spaceId}/categories/${tripId}`)
+      .send({ currency: null, monthlyLimit: 300 })
+      .expect(200);
+    expect(toSpace.body.currency).toBeNull();
+    expect(Number(toSpace.body.monthlyLimit)).toBe(300);
+    await agent
+      .patch(`/api/spaces/${spaceId}/categories/${tripId}`)
+      .send({ currency: 'PLN', monthlyLimit: 860 })
+      .expect(200);
+
+    // A space currency change converts only categories that follow it.
+    await agent
+      .patch(`/api/spaces/${spaceId}`)
+      .send({ primaryCurrency: 'PLN' })
+      .expect(200);
+    const tripAfter = await agent
+      .get(`/api/spaces/${spaceId}/categories/${tripId}`)
+      .expect(200);
+    expect(Number(tripAfter.body.monthlyLimit)).toBe(860); // own currency, untouched
+    const plainAfter = await agent
+      .get(`/api/spaces/${spaceId}/categories/${plainId}`)
+      .expect(200);
+    expect(Number(plainAfter.body.monthlyLimit)).toBe(430); // 100 EUR -> PLN
+
+    await agent
+      .patch(`/api/spaces/${spaceId}/categories/${tripId}`)
+      .send({ currency: 'XYZ' })
+      .expect(400);
+  });
 });

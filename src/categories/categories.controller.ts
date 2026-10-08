@@ -102,6 +102,7 @@ export class CategoriesController {
   @ApiErrorResponse(HttpStatus.NOT_FOUND, 'CATEGORY_NOT_FOUND')
   @ApiErrorResponse(HttpStatus.CONFLICT, 'CATEGORY_NAME_TAKEN')
   @ApiOkResponse({ type: CategoryResponseDto })
+  @ApiErrorResponse(HttpStatus.SERVICE_UNAVAILABLE, 'CURRENCY_API_UNAVAILABLE')
   async update(
     @Param('spaceId') spaceId: string,
     @Param('categoryId') categoryId: string,

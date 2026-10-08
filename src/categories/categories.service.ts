@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import type { Category } from '@prisma/client';
+import { Prisma, type Category } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CurrencyService } from '../currencies/currencies.service';
+import { convertMonthlyLimit } from '../common/utils/money';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 
@@ -9,6 +11,7 @@ export interface CreateCategoryInput {
   icon?: string;
   color?: string;
   monthlyLimit?: number;
+  currency?: string | null;
 }
 
 export interface UpdateCategoryInput {
@@ -16,11 +19,15 @@ export interface UpdateCategoryInput {
   icon?: string;
   color?: string;
   monthlyLimit?: number | null;
+  currency?: string | null;
 }
 
 @Injectable()
 export class CategoriesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly currency: CurrencyService,
+  ) {}
 
   async createCategory(
     spaceId: string,
@@ -41,6 +48,7 @@ export class CategoriesService {
         icon: input.icon,
         color: input.color,
         monthlyLimit: input.monthlyLimit,
+        currency: input.currency ?? null,
         sortOrder: nextSortOrder,
       },
     });
@@ -65,10 +73,32 @@ export class CategoriesService {
     categoryId: string,
     input: UpdateCategoryInput,
   ): Promise<Category> {
-    await this.findCategoryOrThrow(spaceId, categoryId);
+    const category = await this.findCategoryOrThrow(spaceId, categoryId);
 
     if (input.name) {
       await this.assertNameAvailable(spaceId, input.name, categoryId);
+    }
+
+    // Changing the budget currency (null = the space's) converts the limit
+    // at today's rate, unless a limit is sent along: then it's taken as
+    // given, in the new currency.
+    let monthlyLimit: number | null | Prisma.Decimal | undefined =
+      input.monthlyLimit;
+    if (
+      input.currency !== undefined &&
+      monthlyLimit === undefined &&
+      category.monthlyLimit
+    ) {
+      const space = await this.prisma.space.findUniqueOrThrow({
+        where: { id: spaceId },
+        select: { primaryCurrency: true },
+      });
+      const from = category.currency ?? space.primaryCurrency;
+      const to = input.currency ?? space.primaryCurrency;
+      if (from !== to) {
+        const rate = await this.currency.getRate(from, to, new Date());
+        monthlyLimit = convertMonthlyLimit(category.monthlyLimit, rate);
+      }
     }
 
     return this.prisma.category.update({
@@ -77,7 +107,8 @@ export class CategoriesService {
         name: input.name,
         icon: input.icon,
         color: input.color,
-        monthlyLimit: input.monthlyLimit,
+        monthlyLimit,
+        currency: input.currency,
       },
     });
   }

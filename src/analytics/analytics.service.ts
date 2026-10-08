@@ -10,6 +10,7 @@ import {
   toCalendarDate,
   toZonedDate,
 } from '../common/utils/time-zone';
+import { CurrencyService } from '../currencies/currencies.service';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 
@@ -63,6 +64,8 @@ export interface AnalyticsByCategory {
   icon: string | null;
   color: string | null;
   spent: Prisma.Decimal;
+  currency: string;
+  spentInCurrency: Prisma.Decimal;
   limit: Prisma.Decimal | null;
   pct: number;
 }
@@ -88,7 +91,10 @@ export interface AnalyticsResponse {
 
 @Injectable()
 export class AnalyticsService {
-  constructor(protected readonly prisma: PrismaService) {}
+  constructor(
+    protected readonly prisma: PrismaService,
+    private readonly currencyService: CurrencyService,
+  ) {}
 
   async getAnalytics(
     spaceId: string,
@@ -128,7 +134,16 @@ export class AnalyticsService {
       totalIncome: this.sumByType(currentExpenses, TransactionType.INCOME),
       previousPeriodExpense: previousPeriodSums.expense,
       previousPeriodIncome: previousPeriodSums.income,
-      byCategory: this.buildByCategory(categories, currentExpenses),
+      byCategory: this.buildByCategory(
+        categories,
+        currentExpenses,
+        space.primaryCurrency,
+        await this.convertForOwnCurrencyCategories(
+          categories,
+          currentExpenses,
+          space.primaryCurrency,
+        ),
+      ),
       byDay: this.buildByDay(currentExpenses, period),
       expenses: currentExpenses.map((expense) => this.toExpenseItem(expense)),
     };
@@ -267,6 +282,46 @@ export class AnalyticsService {
     return { expense, income };
   }
 
+  /**
+   * For categories with their own budget currency: each of their expenses
+   * converted from its wallet currency at its own day's rate (one batched
+   * lookup). Returns expense id -> amount in the category's currency; empty
+   * when every category follows the space (no rate lookups at all).
+   */
+  private async convertForOwnCurrencyCategories(
+    categories: { id: string; currency: string | null }[],
+    expenses: ExpenseWithJoins[],
+    primaryCurrency: string,
+  ): Promise<Map<string, Prisma.Decimal>> {
+    const ownCurrency = new Map(
+      categories
+        .filter((c) => c.currency && c.currency !== primaryCurrency)
+        .map((c) => [c.id, c.currency!]),
+    );
+    const toConvert = expenses.filter(
+      (e) =>
+        e.type === TransactionType.EXPENSE &&
+        e.categoryId !== null &&
+        ownCurrency.has(e.categoryId),
+    );
+    if (toConvert.length === 0) {
+      return new Map();
+    }
+    const rates = await this.currencyService.getRates(
+      toConvert.map((e) => ({
+        from: e.walletCurrency,
+        to: ownCurrency.get(e.categoryId!)!,
+        date: e.occurredAt,
+      })),
+    );
+    return new Map(
+      toConvert.map((e, i) => [
+        e.id,
+        new Prisma.Decimal(e.amount).times(rates[i]),
+      ]),
+    );
+  }
+
   private buildByCategory(
     categories: {
       id: string;
@@ -274,36 +329,61 @@ export class AnalyticsService {
       icon: string | null;
       color: string | null;
       monthlyLimit: Prisma.Decimal | null;
+      currency: string | null;
     }[],
     expenses: ExpenseWithJoins[],
+    primaryCurrency: string,
+    convertedAmounts: Map<string, Prisma.Decimal>,
   ): AnalyticsByCategory[] {
+    // `spent` is in the space currency (it feeds the split and totals);
+    // `spentInCurrency`, `limit` and `pct` are in the category's currency.
     const spentByCategoryId = new Map<string | null, Prisma.Decimal>();
+    const spentInOwnCurrency = new Map<string, Prisma.Decimal>();
     for (const expense of expenses) {
       if (expense.type !== TransactionType.EXPENSE) continue;
       const key = expense.categoryId;
       const current = spentByCategoryId.get(key) ?? new Prisma.Decimal(0);
       spentByCategoryId.set(key, current.plus(expense.amountInPrimary));
+      const converted = convertedAmounts.get(expense.id);
+      if (key !== null && converted) {
+        spentInOwnCurrency.set(
+          key,
+          (spentInOwnCurrency.get(key) ?? new Prisma.Decimal(0)).plus(
+            converted,
+          ),
+        );
+      }
     }
 
     const result: AnalyticsByCategory[] = categories.map((category) => {
       const spent = spentByCategoryId.get(category.id) ?? new Prisma.Decimal(0);
+      const currency = category.currency ?? primaryCurrency;
+      const spentInCurrency =
+        currency === primaryCurrency
+          ? spent
+          : (spentInOwnCurrency.get(category.id) ?? new Prisma.Decimal(0));
       return {
         categoryId: category.id,
         name: category.name,
         icon: category.icon,
         color: category.color,
         spent,
+        currency,
+        spentInCurrency: spentInCurrency.toDecimalPlaces(4),
         limit: category.monthlyLimit,
-        pct: this.computePct(spent, category.monthlyLimit),
+        pct: this.computePct(spentInCurrency, category.monthlyLimit),
       };
     });
 
+    const uncategorized = spentByCategoryId.get(null) ?? new Prisma.Decimal(0);
     result.push({
       categoryId: null,
       name: UNCATEGORIZED_NAME,
       icon: null,
       color: null,
-      spent: spentByCategoryId.get(null) ?? new Prisma.Decimal(0),
+      spent: uncategorized,
+      currency: primaryCurrency,
+      spentInCurrency: uncategorized,
       limit: null,
       pct: 0,
     });

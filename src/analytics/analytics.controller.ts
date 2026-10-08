@@ -25,6 +25,7 @@ export class AnalyticsController {
   constructor(private readonly analyticsService: AnalyticsService) {}
 
   @Get('analytics')
+  @ApiErrorResponse(HttpStatus.SERVICE_UNAVAILABLE, 'CURRENCY_API_UNAVAILABLE')
   @ApiErrorResponse(
     HttpStatus.BAD_REQUEST,
     'VALIDATION_ERROR',

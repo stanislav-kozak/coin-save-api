@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { HttpStatus } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
 import { AppException } from '../common/exceptions/app.exception';
@@ -10,6 +11,7 @@ function buildService(
   overrides: {
     prisma?: Partial<{ [K in keyof PrismaMock]: Partial<PrismaMock[K]> }>;
     transaction?: ReturnType<typeof vi.fn>;
+    getRate?: ReturnType<typeof vi.fn>;
   } = {},
 ) {
   const basePrisma = {
@@ -21,13 +23,17 @@ function buildService(
       delete: vi.fn(),
       aggregate: vi.fn().mockResolvedValue({ _max: { sortOrder: null } }),
     },
+    space: {
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ primaryCurrency: 'EUR' }),
+    },
   };
   const prisma = {
     ...buildPrismaMock(basePrisma, overrides.prisma),
     $transaction: overrides.transaction ?? vi.fn().mockResolvedValue([]),
   };
-  const service = new CategoriesService(prisma as never);
-  return { service, prisma };
+  const getRate = overrides.getRate ?? vi.fn();
+  const service = new CategoriesService(prisma as never, { getRate } as never);
+  return { service, prisma, getRate };
 }
 
 describe('CategoriesService', () => {
@@ -55,6 +61,7 @@ describe('CategoriesService', () => {
         icon: undefined,
         color: undefined,
         monthlyLimit: undefined,
+        currency: null, // follows the space by default
         sortOrder: 3,
       },
     });
@@ -99,6 +106,79 @@ describe('CategoriesService', () => {
       expect((error as AppException).getStatus()).toBe(HttpStatus.CONFLICT);
     }
     expect(prisma.category.update).not.toHaveBeenCalled();
+  });
+
+  describe('own currency', () => {
+    const tripInPln = {
+      id: 'c1',
+      spaceId: 's1',
+      name: 'Trip',
+      currency: 'PLN',
+      monthlyLimit: new Prisma.Decimal(860),
+    };
+
+    it("converts the limit at today's rate (whole units) when the currency changes", async () => {
+      const getRate = vi.fn().mockResolvedValue(new Prisma.Decimal('0.2558'));
+      const { service, prisma } = buildService({
+        getRate,
+        prisma: {
+          category: { findUnique: vi.fn().mockResolvedValue(tripInPln) },
+        },
+      });
+
+      await service.updateCategory('s1', 'c1', { currency: 'USD' });
+
+      expect(getRate).toHaveBeenCalledWith('PLN', 'USD', expect.any(Date));
+      expect(prisma.category.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: expect.objectContaining({
+          currency: 'USD',
+          monthlyLimit: new Prisma.Decimal(220), // 860 * 0.2558 = 219.99
+        }) as unknown,
+      });
+    });
+
+    it('uses the space currency for null and takes a limit sent along as given', async () => {
+      const getRate = vi.fn();
+      const { service, prisma } = buildService({
+        getRate,
+        prisma: {
+          category: { findUnique: vi.fn().mockResolvedValue(tripInPln) },
+        },
+      });
+
+      await service.updateCategory('s1', 'c1', {
+        currency: null,
+        monthlyLimit: 300,
+      });
+
+      expect(getRate).not.toHaveBeenCalled();
+      expect(prisma.category.update).toHaveBeenCalledWith({
+        where: { id: 'c1' },
+        data: expect.objectContaining({
+          currency: null,
+          monthlyLimit: 300,
+        }) as unknown,
+      });
+    });
+
+    it('does not convert when the effective currency stays the same', async () => {
+      const getRate = vi.fn();
+      const { service } = buildService({
+        getRate,
+        prisma: {
+          category: {
+            findUnique: vi
+              .fn()
+              .mockResolvedValue({ ...tripInPln, currency: null }),
+          },
+        },
+      });
+
+      await service.updateCategory('s1', 'c1', { currency: 'EUR' }); // space is EUR
+
+      expect(getRate).not.toHaveBeenCalled();
+    });
   });
 
   it('removes the monthly limit when monthlyLimit is null', async () => {

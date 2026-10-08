@@ -9,6 +9,7 @@ import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 import { emailMatches, normalizeEmail } from '../common/utils/email';
 import { CurrencyService } from '../currencies/currencies.service';
+import { convertMonthlyLimit } from '../common/utils/money';
 import { findMatchingToken } from '../common/utils/find-matching-token';
 import { slugify } from '../common/utils/slugify';
 import { DEFAULT_CATEGORIES } from './constants/default-categories';
@@ -171,8 +172,9 @@ export class SpacesService {
           occurredAt: true,
         },
       }),
+      // Categories with their own currency keep their limits.
       this.prisma.category.findMany({
-        where: { spaceId, monthlyLimit: { not: null } },
+        where: { spaceId, currency: null, monthlyLimit: { not: null } },
         select: { id: true, monthlyLimit: true },
       }),
     ]);
@@ -195,12 +197,7 @@ export class SpacesService {
     const limitRate = rates[expenses.length];
     const limitRows = categories.map((category) => ({
       id: category.id,
-      monthlyLimit: Prisma.Decimal.max(
-        new Prisma.Decimal(category.monthlyLimit!)
-          .times(limitRate)
-          .toDecimalPlaces(0, Prisma.Decimal.ROUND_HALF_UP),
-        1,
-      ),
+      monthlyLimit: convertMonthlyLimit(category.monthlyLimit!, limitRate),
     }));
 
     // Usual case: one statement (data-modifying CTEs + the space update).
