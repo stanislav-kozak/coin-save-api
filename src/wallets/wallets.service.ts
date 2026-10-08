@@ -1,6 +1,7 @@
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpStatus, Injectable } from '@nestjs/common';
 import { Prisma, TransactionType, type Wallet } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CurrencyService } from '../currencies/currencies.service';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 
@@ -31,11 +32,15 @@ export interface UpdateWalletInput {
   icon?: string;
   color?: string;
   initialBalance?: number;
+  currency?: string;
 }
 
 @Injectable()
 export class WalletsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly currency: CurrencyService,
+  ) {}
 
   async createWallet(
     spaceId: string,
@@ -91,7 +96,10 @@ export class WalletsService {
     walletId: string,
     input: UpdateWalletInput,
   ): Promise<WalletWithBalance> {
-    await this.findWalletOrThrow(spaceId, walletId);
+    const current = await this.findWalletOrThrow(spaceId, walletId);
+    if (input.currency && input.currency !== current.currency) {
+      return this.changeCurrency(current, input);
+    }
 
     const wallet = await this.prisma.wallet.update({
       where: { id: walletId },
@@ -108,6 +116,67 @@ export class WalletsService {
       wallet,
       movements.get(wallet.id) ?? new Prisma.Decimal(0),
     );
+  }
+
+  // Converts everything denominated in the wallet's currency at today's
+  // rate, so the balance converts exactly (old balance x rate). Amounts in
+  // the space currency (amountInPrimary) are kept and fxRate is re-derived
+  // from them. One statement: atomic and a single round trip.
+  private async changeCurrency(
+    wallet: Wallet,
+    input: UpdateWalletInput,
+  ): Promise<WalletWithBalance> {
+    if (input.initialBalance !== undefined) {
+      // Which currency would that balance be in? Ask for two requests.
+      throw new BadRequestException(
+        'currency and initialBalance cannot be changed in the same request',
+      );
+    }
+    if (wallet.archived) {
+      throw new AppException(
+        ERROR_CODES.WALLET_ARCHIVED,
+        HttpStatus.CONFLICT,
+        'Cannot change the currency of an archived wallet',
+      );
+    }
+
+    const to = input.currency!;
+    const rate = (
+      await this.currency.getRate(wallet.currency, to, new Date())
+    ).toString();
+
+    await this.prisma.$queryRaw`
+      WITH e AS (
+        UPDATE "Expense"
+        SET "amount" = ROUND("amount" * ${rate}::numeric, 4),
+            "walletCurrency" = ${to},
+            "fxRate" = CASE
+              WHEN ROUND("amount" * ${rate}::numeric, 4) = 0 THEN "fxRate"
+              ELSE ROUND(
+                "amountInPrimary" / ROUND("amount" * ${rate}::numeric, 4), 8)
+            END,
+            "updatedAt" = NOW()
+        WHERE "walletId" = ${wallet.id}
+        RETURNING 1
+      ), r AS (
+        UPDATE "RecurringTransaction"
+        SET "amount" = ROUND("amount" * ${rate}::numeric, 4),
+            "currency" = ${to},
+            "updatedAt" = NOW()
+        WHERE "walletId" = ${wallet.id}
+        RETURNING 1
+      )
+      UPDATE "Wallet"
+      SET "currency" = ${to},
+          "initialBalance" = ROUND("initialBalance" * ${rate}::numeric, 4),
+          "name" = COALESCE(${input.name ?? null}::text, "name"),
+          "icon" = COALESCE(${input.icon ?? null}::text, "icon"),
+          "color" = COALESCE(${input.color ?? null}::text, "color"),
+          "updatedAt" = NOW()
+      WHERE "id" = ${wallet.id}
+      RETURNING "id"`;
+
+    return this.getWallet(wallet.spaceId, wallet.id);
   }
 
   archiveWallet(spaceId: string, walletId: string): Promise<WalletWithBalance> {

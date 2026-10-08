@@ -65,6 +65,8 @@ export class WalletsController {
   @Patch(':walletId')
   @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
   @ApiErrorResponse(HttpStatus.NOT_FOUND, 'WALLET_NOT_FOUND')
+  @ApiErrorResponse(HttpStatus.CONFLICT, 'WALLET_ARCHIVED')
+  @ApiErrorResponse(HttpStatus.SERVICE_UNAVAILABLE, 'CURRENCY_API_UNAVAILABLE')
   @ApiOkResponse({ type: WalletResponseDto })
   async update(
     @Param('spaceId') spaceId: string,
@@ -78,6 +80,11 @@ export class WalletsController {
       dto,
     );
     this.events.emitToSpace(spaceId, 'wallet.changed', user.id);
+    if (dto.currency) {
+      // Transaction and recurring amounts were converted too.
+      this.events.emitToSpace(spaceId, 'expense.changed', user.id);
+      this.events.emitToSpace(spaceId, 'recurring.changed', user.id);
+    }
     return wallet;
   }
 

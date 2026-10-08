@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
@@ -9,6 +10,8 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { SUPPORTED_CURRENCIES } from '../../common/constants/currencies';
+import { ApiCurrencyProperty } from '../../common/decorators/api-property.decorator';
 
 export class UpdateWalletDto {
   @IsOptional()
@@ -42,4 +45,16 @@ export class UpdateWalletDto {
   @Min(-1_000_000_000)
   @Max(1_000_000_000)
   initialBalance?: number;
+
+  // Converts the wallet's amounts at today's rate; see WalletsService.
+  @ApiCurrencyProperty({
+    required: false,
+    description:
+      "Converts initialBalance, every transaction's amount and every " +
+      "recurring rule's amount at today's rate (4 dp); amounts in the " +
+      'space currency stay. Cannot be combined with initialBalance.',
+  })
+  @IsOptional()
+  @IsIn(SUPPORTED_CURRENCIES)
+  currency?: string;
 }
