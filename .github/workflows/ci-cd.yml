@@ -123,6 +123,12 @@ jobs:
         if: steps.latest.outputs.stale != 'true'
         env:
           DATABASE_URL: ${{ vars.DATABASE_URL || secrets.DATABASE_URL }}
+          POSTGRES_PASSWORD: ${{ vars.POSTGRES_PASSWORD || secrets.POSTGRES_PASSWORD }}
+          BACKUP_S3_BUCKET: ${{ vars.BACKUP_S3_BUCKET || secrets.BACKUP_S3_BUCKET }}
+          BACKUP_S3_ENDPOINT: ${{ vars.BACKUP_S3_ENDPOINT || secrets.BACKUP_S3_ENDPOINT }}
+          BACKUP_S3_ACCESS_KEY_ID: ${{ vars.BACKUP_S3_ACCESS_KEY_ID || secrets.BACKUP_S3_ACCESS_KEY_ID }}
+          BACKUP_S3_SECRET_ACCESS_KEY: ${{ vars.BACKUP_S3_SECRET_ACCESS_KEY || secrets.BACKUP_S3_SECRET_ACCESS_KEY }}
+          BACKUP_S3_PROVIDER: ${{ vars.BACKUP_S3_PROVIDER || secrets.BACKUP_S3_PROVIDER }}
           JWT_ACCESS_SECRET: ${{ vars.JWT_ACCESS_SECRET || secrets.JWT_ACCESS_SECRET }}
           JWT_REFRESH_SECRET: ${{ vars.JWT_REFRESH_SECRET || secrets.JWT_REFRESH_SECRET }}
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID || secrets.GOOGLE_CLIENT_ID }}
