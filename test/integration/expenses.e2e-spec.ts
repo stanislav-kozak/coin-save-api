@@ -338,4 +338,43 @@ describe('Expenses flow (integration)', () => {
       .expect(200);
     expect(Number(expenseAfter.body.amountInPrimary)).toBeCloseTo(430, 2);
   });
+
+  it("GET /api/currencies/rate returns today's rate from the same cache", async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({ frankfurter: frankfurterOk({ USD: 1.1, PLN: 4.3 }) }),
+    );
+    const agent = createCookieAgent(app);
+    const email = 'rate@example.com';
+    const password = 'super-secret-1';
+    await agent.post('/api/auth/signup').send({ email, password }).expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await agent
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+
+    await agent.get('/api/currencies/rate?from=USD&to=PLN').expect(401);
+    await agent.post('/api/auth/login').send({ email, password }).expect(200);
+
+    const res = await agent
+      .get('/api/currencies/rate?from=USD&to=PLN')
+      .expect(200);
+    expect(res.body).toMatchObject({ from: 'USD', to: 'PLN' });
+    expect(typeof res.body.rate).toBe('string');
+    expect(Number(res.body.rate)).toBeCloseTo(4.3 / 1.1, 6);
+    expect(res.body.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    const same = await agent
+      .get('/api/currencies/rate?from=EUR&to=EUR')
+      .expect(200);
+    expect(same.body.rate).toBe('1');
+
+    const unknown = await agent
+      .get('/api/currencies/rate?from=XYZ&to=EUR')
+      .expect(400);
+    expect(unknown.body.code).toBe('VALIDATION_ERROR');
+  });
 });
