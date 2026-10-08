@@ -40,6 +40,25 @@ describe('UsersService', () => {
     expect(publicUserSelect).not.toHaveProperty('passwordHash');
   });
 
+  it('updates only the given profile fields and returns the public profile', async () => {
+    const updated = { id: 'u1', email: 'a@b.com', name: null, locale: 'en' };
+    const prisma = { user: { update: vi.fn().mockResolvedValue(updated) } };
+    const service = new UsersService(prisma as never);
+
+    const result = await service.updateProfile('u1', {
+      name: null,
+      locale: 'en',
+    });
+
+    expect(result).toBe(updated);
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { name: null, locale: 'en' },
+      select: publicUserSelect,
+    });
+    expect(publicUserSelect).not.toHaveProperty('passwordHash');
+  });
+
   it('deletes a user by id', async () => {
     const prisma = { user: { delete: vi.fn().mockResolvedValue({}) } };
     const service = new UsersService(prisma as never);

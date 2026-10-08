@@ -50,6 +50,17 @@ export class UsersService {
     return this.prisma.user.create({ data: { email, passwordHash, name } });
   }
 
+  updateProfile(
+    id: string,
+    data: { name?: string | null; locale?: string },
+  ): Promise<PublicUser> {
+    return this.prisma.user.update({
+      where: { id },
+      data: { name: data.name, locale: data.locale },
+      select: publicUserSelect,
+    });
+  }
+
   async deleteById(id: string): Promise<void> {
     await this.prisma.user.delete({ where: { id } });
   }

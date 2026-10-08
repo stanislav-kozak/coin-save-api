@@ -189,6 +189,29 @@ describe('OpenAPI contract (integration)', () => {
     expect(props.note).toMatchObject({ type: 'string', nullable: true });
   });
 
+  it('documents PATCH /api/users/me (UpdateMeDto -> UserResponseDto)', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/docs.json')
+      .expect(200);
+    const op = res.body.paths['/api/users/me'].patch;
+
+    expect(op.requestBody.content['application/json'].schema.$ref).toBe(
+      '#/components/schemas/UpdateMeDto',
+    );
+    expect(op.responses['200'].content['application/json'].schema.$ref).toBe(
+      '#/components/schemas/UserResponseDto',
+    );
+    expect(Object.keys(op.responses)).toEqual(
+      expect.arrayContaining(['400', '401']),
+    );
+    const props = res.body.components.schemas.UpdateMeDto.properties;
+    expect(props.name).toMatchObject({ type: 'string', nullable: true });
+    expect(props.locale.allOf).toEqual([
+      { $ref: '#/components/schemas/UserLocale' },
+    ]);
+    expect(res.body.components.schemas.UserLocale.enum).toEqual(['uk', 'en']);
+  });
+
   it('documents the error envelope with every API error code', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/docs.json')
