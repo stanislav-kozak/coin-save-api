@@ -3,6 +3,7 @@ import { TransactionType } from '@prisma/client';
 import {
   ApiDateTimeProperty,
   ApiDecimalProperty,
+  ApiCurrencyProperty,
 } from '../../common/decorators/api-property.decorator';
 
 export class AnalyticsPeriodDto {
@@ -30,10 +31,22 @@ export class AnalyticsByCategoryDto {
   @ApiProperty({ type: String, nullable: true })
   color!: string | null;
 
-  @ApiDecimalProperty()
+  @ApiDecimalProperty({ description: 'In the space currency' })
   spent!: string;
 
-  @ApiDecimalProperty({ nullable: true })
+  @ApiCurrencyProperty({
+    description: "The category's budget currency (the space's if it has none)",
+  })
+  currency!: string;
+
+  @ApiDecimalProperty({
+    description:
+      "Spent in `currency`: each expense converted at its own day's rate " +
+      '(equals `spent` when `currency` is the space currency)',
+  })
+  spentInCurrency!: string;
+
+  @ApiDecimalProperty({ nullable: true, description: 'In `currency`' })
   limit!: string | null;
 
   @ApiProperty({

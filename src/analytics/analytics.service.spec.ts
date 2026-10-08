@@ -10,6 +10,7 @@ import {
 function buildService(
   overrides: {
     prisma?: Partial<{ [K in keyof PrismaMock]: Partial<PrismaMock[K]> }>;
+    getRates?: ReturnType<typeof vi.fn>;
   } = {},
 ) {
   const basePrisma = {
@@ -27,8 +28,9 @@ function buildService(
     },
   };
   const prisma = buildPrismaMock(basePrisma, overrides.prisma);
-  const service = new AnalyticsService(prisma as never);
-  return { service, prisma };
+  const getRates = overrides.getRates ?? vi.fn().mockResolvedValue([]);
+  const service = new AnalyticsService(prisma as never, { getRates } as never);
+  return { service, prisma, getRates };
 }
 
 function expenseRow(overrides: Record<string, unknown> = {}) {
@@ -462,6 +464,92 @@ describe('AnalyticsService', () => {
       } catch (error) {
         expect((error as AppException).getStatus()).toBe(HttpStatus.NOT_FOUND);
       }
+    });
+  });
+
+  describe('category currency', () => {
+    it("reports spentInCurrency/limit/pct in a category's own currency, converted per expense", async () => {
+      const getRates = vi.fn().mockResolvedValue([new Prisma.Decimal('3.9')]);
+      const { service } = buildService({
+        getRates,
+        prisma: {
+          category: {
+            findMany: vi.fn().mockResolvedValue([
+              {
+                id: 'trip',
+                name: 'Trip',
+                icon: null,
+                color: null,
+                monthlyLimit: new Prisma.Decimal(780),
+                currency: 'PLN',
+              },
+              {
+                id: 'food',
+                name: 'Food',
+                icon: null,
+                color: null,
+                monthlyLimit: new Prisma.Decimal(100),
+                currency: null,
+              },
+            ]),
+          },
+          expense: {
+            findMany: vi.fn().mockResolvedValue([
+              expenseRow({
+                id: 'e1',
+                categoryId: 'trip',
+                type: TransactionType.EXPENSE,
+                amount: new Prisma.Decimal(100),
+                walletCurrency: 'USD',
+                amountInPrimary: new Prisma.Decimal(90),
+              }),
+              expenseRow({
+                id: 'e2',
+                categoryId: 'food',
+                type: TransactionType.EXPENSE,
+                amountInPrimary: new Prisma.Decimal(25),
+              }),
+            ]),
+          },
+        },
+      });
+
+      const result = await service.getAnalytics('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+        tz: 'UTC',
+      });
+
+      // Only the own-currency category's expenses need a rate.
+      expect(getRates).toHaveBeenCalledTimes(1);
+      expect(getRates).toHaveBeenCalledWith([
+        { from: 'USD', to: 'PLN', date: expect.any(Date) as Date },
+      ]);
+      const trip = result.byCategory.find((c) => c.categoryId === 'trip')!;
+      expect(trip.currency).toBe('PLN');
+      expect(trip.spent.toNumber()).toBe(90); // space currency
+      expect(trip.spentInCurrency.toNumber()).toBe(390);
+      expect(trip.pct).toBe(50); // 390 / 780
+      const food = result.byCategory.find((c) => c.categoryId === 'food')!;
+      expect(food.currency).toBe('EUR');
+      expect(food.spentInCurrency.toNumber()).toBe(25);
+      expect(food.pct).toBe(25);
+      const uncategorized = result.byCategory.find(
+        (c) => c.categoryId === null,
+      )!;
+      expect(uncategorized.currency).toBe('EUR');
+    });
+
+    it('does no rate lookups when every category follows the space', async () => {
+      const { service, getRates } = buildService();
+
+      await service.getAnalytics('s1', {
+        from: '2026-06-01',
+        to: '2026-06-30',
+        tz: 'UTC',
+      });
+
+      expect(getRates).not.toHaveBeenCalled();
     });
   });
 

@@ -154,7 +154,10 @@ model Category {
   name         String
   icon         String?
   color        String?
-  monthlyLimit Decimal? @db.Decimal(19, 4) // in space.primaryCurrency
+  // null = "same as the space": the limit is in space.primaryCurrency and
+  // follows it. Otherwise the limit is in this currency (trip, rent, ...).
+  currency     String?
+  monthlyLimit Decimal? @db.Decimal(19, 4) // in currency ?? space.primaryCurrency
   archived     Boolean  @default(false)
   sortOrder    Int      @default(0)
   createdAt    DateTime @default(now())

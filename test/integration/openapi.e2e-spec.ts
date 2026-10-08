@@ -229,6 +229,34 @@ describe('OpenAPI contract (integration)', () => {
     expect(res.body.components.schemas.Currency.enum).toContain('UAH');
   });
 
+  it('documents currencies on wallets, categories and analytics', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/docs.json')
+      .expect(200);
+    const schemas = res.body.components.schemas;
+    const currencyRef = [{ $ref: '#/components/schemas/Currency' }];
+
+    expect(schemas.UpdateWalletDto.properties.currency.allOf).toEqual(
+      currencyRef,
+    );
+    for (const name of [
+      'CreateCategoryDto',
+      'UpdateCategoryDto',
+      'CategoryResponseDto',
+    ]) {
+      expect(schemas[name].properties.currency).toMatchObject({
+        nullable: true,
+        allOf: currencyRef,
+      });
+    }
+    expect(schemas.AnalyticsByCategoryDto.properties.currency.allOf).toEqual(
+      currencyRef,
+    );
+    expect(
+      schemas.AnalyticsByCategoryDto.properties.spentInCurrency,
+    ).toMatchObject({ type: 'string', format: 'decimal' });
+  });
+
   it('documents the error envelope with every API error code', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/docs.json')

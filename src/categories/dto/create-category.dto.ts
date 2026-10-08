@@ -1,4 +1,5 @@
 import {
+  IsIn,
   IsNumber,
   IsOptional,
   IsPositive,
@@ -8,7 +9,11 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { ApiPositiveAmountProperty } from '../../common/decorators/api-property.decorator';
+import {
+  ApiPositiveAmountProperty,
+  ApiCurrencyProperty,
+} from '../../common/decorators/api-property.decorator';
+import { SUPPORTED_CURRENCIES } from '../../common/constants/currencies';
 
 export class CreateCategoryDto {
   @IsString()
@@ -33,4 +38,17 @@ export class CreateCategoryDto {
   @IsPositive()
   @Max(1_000_000_000)
   monthlyLimit?: number;
+
+  // null = follow the space currency (default).
+  @ApiCurrencyProperty({
+    required: false,
+    nullable: true,
+    description:
+      "Currency of this category's budget; null follows the space. " +
+      "Changing it converts monthlyLimit at today's rate (whole units) " +
+      'unless monthlyLimit is sent too, taken as given in the new currency.',
+  })
+  @IsOptional()
+  @IsIn(SUPPORTED_CURRENCIES)
+  currency?: string | null;
 }
