@@ -162,4 +162,51 @@ describe('Spaces flow (integration)', () => {
       .expect(403);
     expect(res.body.code).toBe('CANNOT_REMOVE_LAST_OWNER');
   });
+
+  it('creates default categories in the UI language sent with the request', async () => {
+    const agent = createCookieAgent(app);
+    const email = 'categories-lang@example.com';
+    const password = 'super-secret-1';
+    // The account is Ukrainian, the UI the space is created in is English.
+    await agent
+      .post('/api/auth/signup')
+      .send({ email, password, locale: 'uk' })
+      .expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await agent
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+    await agent.post('/api/auth/login').send({ email, password }).expect(200);
+
+    const categoryNames = async (spaceId: string) =>
+      (
+        (await agent.get(`/api/spaces/${spaceId}/categories`).expect(200))
+          .body as { name: string }[]
+      ).map((c) => c.name);
+
+    const english = await agent
+      .post('/api/spaces')
+      .send({ name: 'Home', locale: 'en' })
+      .expect(201);
+    expect(await categoryNames(english.body.id as string)).toContain(
+      'Groceries',
+    );
+
+    // Without a language, the account's (Ukrainian here) is used.
+    const fallback = await agent
+      .post('/api/spaces')
+      .send({ name: 'Дім' })
+      .expect(201);
+    expect(await categoryNames(fallback.body.id as string)).toContain(
+      'Продукти',
+    );
+
+    await agent
+      .post('/api/spaces')
+      .send({ name: 'X', locale: 'de' })
+      .expect(400);
+  });
 });

@@ -119,6 +119,49 @@ describe('SpacesService', () => {
     expect(createManyCall.data[0].spaceId).toBe('s1');
   });
 
+  describe('default categories language', () => {
+    const seed = (ownerLocale: string) =>
+      buildService({
+        prisma: {
+          user: {
+            findUnique: vi
+              .fn()
+              .mockResolvedValue({ id: 'u1', locale: ownerLocale }),
+          },
+          space: {
+            create: vi.fn().mockResolvedValue({ id: 's1', name: 'Family' }),
+            findUnique: vi.fn().mockResolvedValue(null),
+          },
+          category: { createMany: vi.fn().mockResolvedValue({ count: 6 }) },
+        },
+      });
+    const names = (prisma: {
+      category: { createMany: { mock: { calls: unknown[][] } } };
+    }) =>
+      (
+        prisma.category.createMany.mock.calls[0][0] as {
+          data: { name: string }[];
+        }
+      ).data.map((c) => c.name);
+
+    it('uses the UI language sent with the request, over the saved account language', async () => {
+      const { service, prisma } = seed('uk');
+
+      await service.createSpace('u1', 'Family', 'en');
+
+      expect(names(prisma)).toContain('Groceries');
+      expect(names(prisma)).not.toContain('Продукти');
+    });
+
+    it('falls back to the account language when none is sent', async () => {
+      const { service, prisma } = seed('uk');
+
+      await service.createSpace('u1', 'Family');
+
+      expect(names(prisma)).toContain('Продукти');
+    });
+  });
+
   it('rejects inviting an email that already belongs to a member', async () => {
     const { service } = buildService({
       prisma: {

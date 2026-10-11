@@ -61,12 +61,28 @@ describe('SpacesController', () => {
     await app.close();
   });
 
+  it('POST /spaces passes the UI language for the default categories', async () => {
+    await request(app.getHttpServer())
+      .post('/spaces')
+      .send({ name: 'Family', locale: 'en' })
+      .expect(201);
+    expect(spacesService.createSpace).toHaveBeenLastCalledWith(
+      'u1',
+      'Family',
+      'en',
+    );
+  });
+
   it('POST /spaces creates a space for the current user', async () => {
     await request(app.getHttpServer())
       .post('/spaces')
       .send({ name: 'Family' })
       .expect(201);
-    expect(spacesService.createSpace).toHaveBeenCalledWith('u1', 'Family');
+    expect(spacesService.createSpace).toHaveBeenCalledWith(
+      'u1',
+      'Family',
+      undefined,
+    );
     expect(events.emitToSpace).not.toHaveBeenCalled();
   });
 
