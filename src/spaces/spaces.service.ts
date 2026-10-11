@@ -94,10 +94,21 @@ export class SpacesService {
     private readonly currency: CurrencyService,
   ) {}
 
-  async createSpace(ownerId: string, name: string): Promise<Space> {
+  async createSpace(
+    ownerId: string,
+    name: string,
+    requestedLocale?: 'en' | 'uk',
+  ): Promise<Space> {
     const slug = await this.generateUniqueSlug(name);
-    const owner = await this.prisma.user.findUnique({ where: { id: ownerId } });
-    const locale = owner?.locale === 'uk' ? 'uk' : 'en';
+    // Default categories follow the UI language the space is created in;
+    // without one, the owner's saved language (English unless Ukrainian).
+    let locale = requestedLocale;
+    if (!locale) {
+      const owner = await this.prisma.user.findUnique({
+        where: { id: ownerId },
+      });
+      locale = owner?.locale === 'uk' ? 'uk' : 'en';
+    }
 
     const space = await this.prisma.space.create({
       data: {

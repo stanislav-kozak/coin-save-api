@@ -49,7 +49,7 @@ export class SpacesController {
   @ApiErrorResponse(HttpStatus.BAD_REQUEST, 'VALIDATION_ERROR')
   @ApiCreatedResponse({ type: SpaceResponseDto })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSpaceDto) {
-    return this.spacesService.createSpace(user.id, dto.name);
+    return this.spacesService.createSpace(user.id, dto.name, dto.locale);
   }
 
   @Get()
