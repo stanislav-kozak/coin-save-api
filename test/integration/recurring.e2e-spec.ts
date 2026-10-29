@@ -395,4 +395,78 @@ describe('Recurring flow (integration)', () => {
     expect(generated).toHaveLength(1);
     expect(generated[0].occurredAt.toISOString().slice(0, 10)).toBe(today);
   });
+
+  it('moves the next payment to a later date via nextPaymentDate and generates on that day only', async () => {
+    const agent = createCookieAgent(app);
+    const email = 'next-payment@example.com';
+    const password = 'super-secret-1';
+    await agent.post('/api/auth/signup').send({ email, password }).expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await agent
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+    await agent.post('/api/auth/login').send({ email, password }).expect(200);
+    const spaceId = (
+      await agent.post('/api/spaces').send({ name: 'Next payment' }).expect(201)
+    ).body.id as string;
+    const walletId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/wallets`)
+        .send({ name: 'Cash', currency: 'EUR', initialBalance: 0 })
+        .expect(201)
+    ).body.id as string;
+    const recurringId = (
+      await agent
+        .post(`/api/spaces/${spaceId}/recurring`)
+        .send({
+          walletId,
+          type: TransactionType.EXPENSE,
+          amount: 15.99,
+          name: 'Netflix',
+          frequency: RecurringFrequency.MONTHLY,
+          dayOfMonth: 5,
+          startDate: '2026-01-01T00:00:00.000Z',
+        })
+        .expect(201)
+    ).body.id as string;
+
+    const pastRes = await agent
+      .patch(`/api/spaces/${spaceId}/recurring/${recurringId}?tz=UTC`)
+      .send({ nextPaymentDate: new Date().toISOString().slice(0, 10) })
+      .expect(400);
+    expect(pastRes.body.code).toBe('NEXT_PAYMENT_DATE_IN_PAST');
+
+    await agent
+      .patch(`/api/spaces/${spaceId}/recurring/${recurringId}`)
+      .send({ nextPaymentDate: '2026-12-40' })
+      .expect(400);
+
+    const nextYear = new Date().getUTCFullYear() + 1;
+    const nextPaymentDate = `${nextYear}-03-20`;
+    const moved = await agent
+      .patch(`/api/spaces/${spaceId}/recurring/${recurringId}?tz=Europe/Kyiv`)
+      .send({ nextPaymentDate })
+      .expect(200);
+    expect(moved.body.startDate).toBe(`${nextPaymentDate}T00:00:00.000Z`);
+    expect(moved.body.dayOfMonth).toBe(20);
+    expect(moved.body.lastGeneratedAt).toBeNull();
+
+    await app
+      .get(RecurringGeneratorService)
+      .generateForRecurring(
+        recurringId,
+        new Date(`${nextYear}-04-25T00:00:00.000Z`),
+      );
+
+    const generated = await prisma.expense.findMany({
+      where: { recurringId },
+      orderBy: { occurredAt: 'asc' },
+    });
+    expect(
+      generated.map((e) => e.occurredAt.toISOString().slice(0, 10)),
+    ).toEqual([nextPaymentDate, `${nextYear}-04-20`]);
+  });
 });

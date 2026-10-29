@@ -124,6 +124,7 @@ describe('RecurringController', () => {
       's1',
       'r1',
       { amount: 20 },
+      undefined,
     );
     expect(events.emitToSpace).toHaveBeenCalledWith(
       's1',

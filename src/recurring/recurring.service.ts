@@ -8,6 +8,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { lastDueDateBefore } from './recurring-due-dates';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
+import {
+  DEFAULT_TIME_ZONE,
+  addDays,
+  toZonedDate,
+} from '../common/utils/time-zone';
 
 export interface CreateRecurringTransactionInput {
   walletId: string;
@@ -30,6 +35,7 @@ export interface UpdateRecurringTransactionInput {
   note?: string;
   dayOfMonth?: number;
   endDate?: string | null;
+  nextPaymentDate?: string;
 }
 
 @Injectable()
@@ -109,6 +115,7 @@ export class RecurringService {
     spaceId: string,
     id: string,
     input: UpdateRecurringTransactionInput,
+    timeZone: string = DEFAULT_TIME_ZONE,
   ): Promise<RecurringTransaction> {
     const existing = await this.findRecurringOrThrow(spaceId, id);
 
@@ -116,10 +123,31 @@ export class RecurringService {
       await this.assertCategoryInSpace(spaceId, input.categoryId);
     }
 
-    if (
-      input.endDate &&
-      new Date(input.endDate).getTime() <= existing.startDate.getTime()
-    ) {
+    // Moving the next payment restarts the schedule on that day: due dates
+    // are computed from startDate again (lastGeneratedAt cleared), and the
+    // generator's (recurringId, occurredAt) check keeps any payment already
+    // recorded on a matching day from being created twice.
+    let nextPayment: Date | undefined;
+    if (input.nextPaymentDate) {
+      const tomorrow = addDays(toZonedDate(new Date(), timeZone), 1);
+      if (input.nextPaymentDate < tomorrow) {
+        throw new AppException(
+          ERROR_CODES.NEXT_PAYMENT_DATE_IN_PAST,
+          HttpStatus.BAD_REQUEST,
+          'nextPaymentDate must be tomorrow or later',
+        );
+      }
+      nextPayment = new Date(`${input.nextPaymentDate}T00:00:00.000Z`);
+    }
+
+    const startDate = nextPayment ?? existing.startDate;
+    const endDate =
+      input.endDate === undefined
+        ? existing.endDate
+        : input.endDate
+          ? new Date(input.endDate)
+          : null;
+    if (endDate && endDate.getTime() <= startDate.getTime()) {
       throw new AppException(
         ERROR_CODES.INVALID_RECURRING_DATE_RANGE,
         HttpStatus.BAD_REQUEST,
@@ -149,6 +177,11 @@ export class RecurringService {
             : input.endDate
               ? new Date(input.endDate)
               : undefined,
+        ...(nextPayment && {
+          startDate: nextPayment,
+          dayOfMonth: nextPayment.getUTCDate(),
+          lastGeneratedAt: null,
+        }),
       },
     });
   }

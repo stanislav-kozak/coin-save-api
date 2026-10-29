@@ -504,6 +504,127 @@ describe('RecurringService', () => {
         prisma.recurringTransaction.update.mock.calls[0][0].data;
       expect(updateData.categoryId).toBeNull();
     });
+
+    describe('nextPaymentDate', () => {
+      function buildWithExisting(existing: object = existingRecurring) {
+        return buildService({
+          prisma: {
+            recurringTransaction: {
+              findUnique: vi.fn().mockResolvedValue(existing),
+              update: vi.fn().mockResolvedValue(existing),
+            },
+          },
+        });
+      }
+
+      it('restarts the schedule on the new date: startDate, dayOfMonth, lastGeneratedAt reset', async () => {
+        const { service, prisma } = buildWithExisting({
+          ...existingRecurring,
+          dayOfMonth: 5,
+          lastGeneratedAt: new Date('2026-08-05T00:00:00.000Z'),
+        });
+
+        await service.updateRecurringTransaction('s1', 'r1', {
+          nextPaymentDate: '2026-11-20',
+        });
+
+        const updateData =
+          prisma.recurringTransaction.update.mock.calls[0][0].data;
+        expect(updateData.startDate).toEqual(
+          new Date('2026-11-20T00:00:00.000Z'),
+        );
+        expect(updateData.dayOfMonth).toBe(20);
+        expect(updateData.lastGeneratedAt).toBeNull();
+      });
+
+      it('takes the day from nextPaymentDate over a dayOfMonth sent alongside', async () => {
+        const { service, prisma } = buildWithExisting();
+
+        await service.updateRecurringTransaction('s1', 'r1', {
+          dayOfMonth: 3,
+          nextPaymentDate: '2026-09-10',
+        });
+
+        const updateData =
+          prisma.recurringTransaction.update.mock.calls[0][0].data;
+        expect(updateData.dayOfMonth).toBe(10);
+      });
+
+      it('accepts tomorrow in the given time zone', async () => {
+        const { service, prisma } = buildWithExisting();
+
+        await service.updateRecurringTransaction(
+          's1',
+          'r1',
+          { nextPaymentDate: '2026-08-16' },
+          'Europe/Kyiv',
+        );
+
+        expect(prisma.recurringTransaction.update).toHaveBeenCalled();
+      });
+
+      it.each([
+        // now = 2026-08-15T12:00Z, which is already 08-16 in Kiritimati (UTC+14).
+        ['today', '2026-08-15', 'Europe/Kyiv'],
+        ['in the past', '2026-07-01', 'Europe/Kyiv'],
+        ["today in the user's zone", '2026-08-16', 'Pacific/Kiritimati'],
+      ])(
+        'throws NEXT_PAYMENT_DATE_IN_PAST for a date %s',
+        async (_, nextPaymentDate, timeZone) => {
+          const { service, prisma } = buildWithExisting();
+
+          try {
+            await service.updateRecurringTransaction(
+              's1',
+              'r1',
+              { nextPaymentDate },
+              timeZone,
+            );
+            throw new Error('expected rejection');
+          } catch (error) {
+            expect((error as AppException).getStatus()).toBe(
+              HttpStatus.BAD_REQUEST,
+            );
+            expect((error as AppException).getResponse()).toMatchObject({
+              code: 'NEXT_PAYMENT_DATE_IN_PAST',
+            });
+          }
+          expect(prisma.recurringTransaction.update).not.toHaveBeenCalled();
+        },
+      );
+
+      it('throws INVALID_RECURRING_DATE_RANGE when the existing endDate is not after nextPaymentDate', async () => {
+        const { service } = buildWithExisting({
+          ...existingRecurring,
+          endDate: new Date('2026-10-01T00:00:00.000Z'),
+        });
+
+        try {
+          await service.updateRecurringTransaction('s1', 'r1', {
+            nextPaymentDate: '2026-10-01',
+          });
+          throw new Error('expected rejection');
+        } catch (error) {
+          expect((error as AppException).getResponse()).toMatchObject({
+            code: 'INVALID_RECURRING_DATE_RANGE',
+          });
+        }
+      });
+
+      it('accepts a new endDate after nextPaymentDate in the same request', async () => {
+        const { service, prisma } = buildWithExisting({
+          ...existingRecurring,
+          endDate: new Date('2026-10-01T00:00:00.000Z'),
+        });
+
+        await service.updateRecurringTransaction('s1', 'r1', {
+          nextPaymentDate: '2026-10-15',
+          endDate: '2027-01-01T00:00:00.000Z',
+        });
+
+        expect(prisma.recurringTransaction.update).toHaveBeenCalled();
+      });
+    });
   });
 
   describe('pauseRecurringTransaction / resumeRecurringTransaction', () => {
