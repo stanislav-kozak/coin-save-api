@@ -16,6 +16,7 @@ import { RecurringService } from './recurring.service';
 import { CreateRecurringTransactionDto } from './dto/create-recurring-transaction.dto';
 import { UpdateRecurringTransactionDto } from './dto/update-recurring-transaction.dto';
 import { ListRecurringQueryDto } from './dto/list-recurring-query.dto';
+import { UpdateRecurringQueryDto } from './dto/update-recurring-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { SpaceMemberGuard } from '../common/guards/space-member.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -89,6 +90,7 @@ export class RecurringController {
     HttpStatus.BAD_REQUEST,
     'VALIDATION_ERROR',
     'INVALID_RECURRING_DATE_RANGE',
+    'NEXT_PAYMENT_DATE_IN_PAST',
   )
   @ApiErrorResponse(
     HttpStatus.NOT_FOUND,
@@ -103,11 +105,13 @@ export class RecurringController {
     @Param('recurringId') recurringId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateRecurringTransactionDto,
+    @Query() query: UpdateRecurringQueryDto,
   ) {
     const recurring = await this.recurringService.updateRecurringTransaction(
       spaceId,
       recurringId,
       dto,
+      query.tz,
     );
     this.events.emitToSpace(spaceId, 'recurring.changed', user.id);
     return recurring;
