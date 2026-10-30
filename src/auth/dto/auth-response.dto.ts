@@ -33,6 +33,13 @@ export class UserResponseDto {
   @ApiProperty({ example: 'uk' })
   locale!: string;
 
+  @ApiDateTimeProperty({
+    nullable: true,
+    description:
+      'When the user finished (or skipped) the onboarding tour; null shows it',
+  })
+  onboardingCompletedAt!: string | null;
+
   @ApiDateTimeProperty()
   createdAt!: string;
 

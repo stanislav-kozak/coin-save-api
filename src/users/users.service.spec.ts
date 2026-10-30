@@ -59,6 +59,25 @@ describe('UsersService', () => {
     expect(publicUserSelect).not.toHaveProperty('passwordHash');
   });
 
+  it.each([
+    [true, expect.any(Date)],
+    [false, null],
+  ])(
+    'onboardingCompleted=%s sets onboardingCompletedAt to %s',
+    async (onboardingCompleted, onboardingCompletedAt) => {
+      const prisma = { user: { update: vi.fn().mockResolvedValue({}) } };
+      const service = new UsersService(prisma as never);
+
+      await service.updateProfile('u1', { onboardingCompleted });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'u1' },
+        data: { name: undefined, locale: undefined, onboardingCompletedAt },
+        select: publicUserSelect,
+      });
+    },
+  );
+
   it('deletes a user by id', async () => {
     const prisma = { user: { delete: vi.fn().mockResolvedValue({}) } };
     const service = new UsersService(prisma as never);

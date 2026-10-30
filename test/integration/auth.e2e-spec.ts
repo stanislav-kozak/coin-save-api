@@ -128,6 +128,7 @@ describe('Auth flow (integration)', () => {
       'id',
       'locale',
       'name',
+      'onboardingCompletedAt',
       'updatedAt',
     ]);
     expect(meRes.body.email).toBe(email);
@@ -388,11 +389,28 @@ describe('Auth flow (integration)', () => {
     const cleared = await patchMe({ name: null }).expect(200);
     expect(cleared.body).toMatchObject({ name: null, locale: 'en' });
 
+    // Onboarding tour: unset for a new user, set by true, reset by false.
+    expect(me.body.onboardingCompletedAt).toBeNull();
+    const completed = await patchMe({ onboardingCompleted: true }).expect(200);
+    expect(
+      new Date(completed.body.onboardingCompletedAt).getTime(),
+    ).not.toBeNaN();
+    const meAfterTour = await request(app.getHttpServer())
+      .get('/api/auth/me')
+      .set('Cookie', cookies)
+      .expect(200);
+    expect(meAfterTour.body.onboardingCompletedAt).toBe(
+      completed.body.onboardingCompletedAt,
+    );
+    const reset = await patchMe({ onboardingCompleted: false }).expect(200);
+    expect(reset.body.onboardingCompletedAt).toBeNull();
+
     for (const invalid of [
       { locale: 'de' },
       { locale: null },
       { name: '   ' },
       { name: 'x'.repeat(101) },
+      { onboardingCompleted: 'yes' },
     ]) {
       const res = await patchMe(invalid).expect(400);
       expect(res.body.code).toBe('VALIDATION_ERROR');
@@ -437,5 +455,6 @@ describe('Auth flow (integration)', () => {
       emailLocale: 'uk',
       accountLocale: 'uk',
     });
-  });
+    // Two full signups (argon2 hashing) take ~4s on CI, near the 5s default.
+  }, 15_000);
 });
