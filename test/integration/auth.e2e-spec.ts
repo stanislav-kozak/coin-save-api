@@ -128,6 +128,7 @@ describe('Auth flow (integration)', () => {
       'id',
       'locale',
       'name',
+      'onboardingCompletedAt',
       'updatedAt',
     ]);
     expect(meRes.body.email).toBe(email);
@@ -454,5 +455,6 @@ describe('Auth flow (integration)', () => {
       emailLocale: 'uk',
       accountLocale: 'uk',
     });
-  });
+    // Two full signups (argon2 hashing) take ~4s on CI, near the 5s default.
+  }, 15_000);
 });
