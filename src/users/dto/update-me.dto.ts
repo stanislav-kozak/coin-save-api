@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  IsBoolean,
   IsIn,
   IsOptional,
   IsString,
@@ -34,4 +35,13 @@ export class UpdateMeDto {
   @ValidateIf((o: UpdateMeDto) => o.locale !== undefined)
   @IsIn(USER_LOCALES)
   locale?: UserLocale;
+
+  @ApiPropertyOptional({
+    description:
+      'true records the onboarding tour as completed now; false resets it ' +
+      'so the tour shows again',
+  })
+  @IsOptional()
+  @IsBoolean()
+  onboardingCompleted?: boolean;
 }

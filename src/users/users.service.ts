@@ -11,6 +11,7 @@ export const publicUserSelect = {
   name: true,
   avatarUrl: true,
   locale: true,
+  onboardingCompletedAt: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.UserSelect;
@@ -55,11 +56,21 @@ export class UsersService {
 
   updateProfile(
     id: string,
-    data: { name?: string | null; locale?: string },
+    data: {
+      name?: string | null;
+      locale?: string;
+      onboardingCompleted?: boolean;
+    },
   ): Promise<PublicUser> {
     return this.prisma.user.update({
       where: { id },
-      data: { name: data.name, locale: data.locale },
+      data: {
+        name: data.name,
+        locale: data.locale,
+        ...(data.onboardingCompleted !== undefined && {
+          onboardingCompletedAt: data.onboardingCompleted ? new Date() : null,
+        }),
+      },
       select: publicUserSelect,
     });
   }

@@ -10,15 +10,16 @@ datasource db {
 // ── Users & auth ────────────────────────────────────────────────
 
 model User {
-  id            String    @id @default(cuid())
-  email         String    @unique
-  emailVerified DateTime?
-  passwordHash  String?
-  name          String?
-  avatarUrl     String?
-  locale        String    @default("en") // email language; "en" for new users since 2026-10-08
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                    String    @id @default(cuid())
+  email                 String    @unique
+  emailVerified         DateTime?
+  passwordHash          String?
+  name                  String?
+  avatarUrl             String?
+  locale                String    @default("en") // email language; "en" for new users since 2026-10-08
+  onboardingCompletedAt DateTime? // null ⇒ the frontend shows the onboarding tour
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   memberships      Membership[]
   ownedSpaces      Space[]                @relation("SpaceOwner")
