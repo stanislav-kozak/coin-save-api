@@ -36,11 +36,12 @@ import { LoginDto } from './dto/login.dto';
 import { LoginResponseDto, UserResponseDto } from './dto/auth-response.dto';
 import { MessageResponseDto } from '../common/dto/message-response.dto';
 import { ApiErrorResponse } from '../common/decorators/api-error-response.decorator';
+import { ACCESS_TOKEN_TTL_MS } from './token.service';
 
 const ACCESS_COOKIE = 'access';
 const REFRESH_COOKIE = 'refresh';
 // Non-secret "a session exists" hint on path=/ so the frontend middleware can
-// tell a logged-in user apart after the 15-minute access cookie expires (the
+// tell a logged-in user apart after the access cookie expires (the
 // refresh cookie is only sent to /api/auth). Lives as long as the refresh token.
 const SESSION_COOKIE = 'session';
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -269,7 +270,7 @@ export class AuthController {
       secure: true,
       sameSite: 'lax',
       path: '/',
-      maxAge: 15 * 60 * 1000,
+      maxAge: ACCESS_TOKEN_TTL_MS,
     });
     res.cookie(REFRESH_COOKIE, refreshToken, {
       httpOnly: true,

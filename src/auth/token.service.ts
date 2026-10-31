@@ -7,6 +7,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
 
+// Access JWTs are not stored, so they can't be revoked: logout and password
+// reset end a session for good only once its access token expires.
+export const ACCESS_TOKEN_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 const REFRESH_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 // How long a just-rotated token is still accepted (see rotateRefreshToken).
 // Well above the frontend's 10 s refresh timeout plus mobile network delays.

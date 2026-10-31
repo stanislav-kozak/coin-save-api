@@ -179,6 +179,16 @@ describe('AuthController', () => {
     expect(session).toContain('SameSite=Lax');
   });
 
+  it('POST /auth/login sets the access cookie for 3 days', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'a@b.com', password: 'password123' })
+      .expect(200);
+
+    const access = setCookies(res).find((c) => c.startsWith('access='));
+    expect(access).toContain(`Max-Age=${3 * 24 * 60 * 60}`);
+  });
+
   it('POST /auth/refresh re-issues the session hint cookie on success', async () => {
     authService.refresh.mockResolvedValueOnce({
       accessToken: 'access-2',
