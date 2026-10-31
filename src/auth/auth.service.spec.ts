@@ -373,4 +373,94 @@ describe('AuthService', () => {
     expect(prisma.emailVerificationToken.update).not.toHaveBeenCalled();
     expect(users.markEmailVerified).not.toHaveBeenCalled();
   });
+
+  describe('validateGoogleUser', () => {
+    const profile = {
+      email: 'Olena@Example.com',
+      name: 'Olena',
+      avatarUrl: 'https://example.com/a.png',
+      providerAccountId: 'g-123',
+    };
+
+    function buildGoogle(
+      overrides: { existingAccount?: object; user?: object } = {},
+    ) {
+      const authAccount = {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue(overrides.existingAccount ?? null),
+        upsert: vi.fn().mockResolvedValue({}),
+      };
+      const user = {
+        upsert: vi
+          .fn()
+          .mockResolvedValue({ id: 'u-new', email: 'olena@example.com' }),
+      };
+      const built = buildService({
+        prisma: { authAccount, user },
+        users: {
+          findByEmail: vi.fn().mockResolvedValue(overrides.user ?? null),
+        },
+      });
+      return { ...built, authAccount, user };
+    }
+
+    it('returns the user already linked to the Google account', async () => {
+      const { service, authAccount } = buildGoogle({
+        existingAccount: { user: { id: 'u1', email: 'olena@example.com' } },
+      });
+
+      await expect(service.validateGoogleUser(profile)).resolves.toEqual({
+        id: 'u1',
+        email: 'olena@example.com',
+      });
+      expect(authAccount.upsert).not.toHaveBeenCalled();
+    });
+
+    it('creates the user and the link with upserts, so a parallel callback cannot fail on a unique constraint', async () => {
+      const { service, authAccount, user } = buildGoogle();
+
+      await expect(service.validateGoogleUser(profile)).resolves.toEqual({
+        id: 'u-new',
+        email: 'olena@example.com',
+      });
+      expect(user.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { email: 'olena@example.com' },
+          update: {},
+        }),
+      );
+      expect(authAccount.upsert).toHaveBeenCalledWith({
+        where: {
+          provider_providerAccountId: {
+            provider: 'google',
+            providerAccountId: 'g-123',
+          },
+        },
+        create: {
+          userId: 'u-new',
+          provider: 'google',
+          providerAccountId: 'g-123',
+        },
+        update: {},
+      });
+    });
+
+    it('links Google to an existing account with the same email', async () => {
+      const { service, authAccount, user } = buildGoogle({
+        user: { id: 'u-local', email: 'olena@example.com' },
+      });
+
+      await expect(service.validateGoogleUser(profile)).resolves.toEqual({
+        id: 'u-local',
+        email: 'olena@example.com',
+      });
+      expect(user.upsert).not.toHaveBeenCalled();
+      expect(authAccount.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ userId: 'u-local' }) as unknown,
+        }),
+      );
+    });
+  });
 });

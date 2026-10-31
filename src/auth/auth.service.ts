@@ -184,25 +184,36 @@ export class AuthService {
       return { id: existingAccount.user.id, email: existingAccount.user.email };
     }
 
+    // Upserts, not creates: the callback can run twice at once for the same
+    // first-time user (a double-submitted sign-in), and the second insert
+    // would hit a unique constraint and fail the sign-in with a 500.
     const email = normalizeEmail(profile.email);
-    let user = await this.users.findByEmail(email);
-    if (!user) {
-      user = await this.prisma.user.create({
-        data: {
+    const user =
+      (await this.users.findByEmail(email)) ??
+      (await this.prisma.user.upsert({
+        where: { email },
+        create: {
           email,
           name: profile.name,
           avatarUrl: profile.avatarUrl,
           emailVerified: new Date(),
         },
-      });
-    }
+        update: {},
+      }));
 
-    await this.prisma.authAccount.create({
-      data: {
+    await this.prisma.authAccount.upsert({
+      where: {
+        provider_providerAccountId: {
+          provider: 'google',
+          providerAccountId: profile.providerAccountId,
+        },
+      },
+      create: {
         userId: user.id,
         provider: 'google',
         providerAccountId: profile.providerAccountId,
       },
+      update: {},
     });
 
     return { id: user.id, email: user.email };

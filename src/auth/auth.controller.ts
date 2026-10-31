@@ -8,6 +8,7 @@ import {
   Post,
   Req,
   Res,
+  UseFilters,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -28,6 +29,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GoogleAuthGuard } from './guards/google-auth.guard';
+import { GoogleCallbackExceptionFilter } from './filters/google-callback.filter';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/types/authenticated-user';
 import { AppException } from '../common/exceptions/app.exception';
@@ -204,9 +206,12 @@ export class AuthController {
 
   @Get('google/callback')
   @ApiFoundResponse({
-    description: 'Sets auth cookies and redirects to the frontend',
+    description:
+      'Sets auth cookies and redirects to the frontend; on failure redirects ' +
+      'to /login?error=GOOGLE_AUTH_FAILED (or / when a session already exists)',
   })
   @UseGuards(GoogleAuthGuard)
+  @UseFilters(GoogleCallbackExceptionFilter)
   async googleCallback(
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
