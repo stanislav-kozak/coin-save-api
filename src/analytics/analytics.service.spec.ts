@@ -44,9 +44,13 @@ function expenseRow(overrides: Record<string, unknown> = {}) {
     note: null,
     occurredAt: new Date('2026-06-10T00:00:00.000Z'),
     walletId: 'w1',
+    toWalletId: null,
+    toAmount: null,
+    toWalletCurrency: null,
     categoryId: 'c1',
     createdById: 'u1',
     wallet: { name: 'Cash' },
+    toWallet: null,
     category: { name: 'Groceries' },
     createdBy: { name: 'Olena', email: 'olena@example.com' },
     ...overrides,
@@ -55,6 +59,66 @@ function expenseRow(overrides: Record<string, unknown> = {}) {
 
 describe('AnalyticsService', () => {
   describe('getAnalytics', () => {
+    it('lists transfers but keeps them out of totals, byDay, byCategory and the previous period', async () => {
+      const transfer = expenseRow({
+        id: 't1',
+        type: TransactionType.TRANSFER,
+        amount: new Prisma.Decimal(50),
+        amountInPrimary: new Prisma.Decimal(50),
+        categoryId: null,
+        category: null,
+        toWalletId: 'w2',
+        toAmount: new Prisma.Decimal(2100),
+        toWalletCurrency: 'UAH',
+        toWallet: { name: 'Mono' },
+      });
+      const { service } = buildService({
+        prisma: {
+          expense: {
+            findMany: vi.fn().mockResolvedValue([
+              expenseRow({
+                id: 'e1',
+                amountInPrimary: new Prisma.Decimal(30),
+              }),
+              transfer,
+            ]),
+            groupBy: vi.fn().mockResolvedValue([
+              {
+                type: TransactionType.TRANSFER,
+                _sum: { amountInPrimary: new Prisma.Decimal(999) },
+              },
+            ]),
+          },
+        },
+      });
+
+      const result = await service.getAnalytics('s1', {
+        from: '2026-06-10',
+        to: '2026-06-10',
+        tz: 'UTC',
+      });
+
+      expect(result.totalExpense.toNumber()).toBe(30);
+      expect(result.totalIncome.toNumber()).toBe(0);
+      expect(result.previousPeriodExpense.toNumber()).toBe(0);
+      expect(result.previousPeriodIncome.toNumber()).toBe(0);
+      expect(result.byDay[0].expense.toNumber()).toBe(30);
+      expect(result.byDay[0].income.toNumber()).toBe(0);
+      // The transfer has no category, yet must not land in Uncategorized.
+      expect(
+        result.byCategory.find((c) => c.categoryId === null)!.spent.toNumber(),
+      ).toBe(0);
+      expect(result.expenses.find((e) => e.id === 't1')).toMatchObject({
+        type: TransactionType.TRANSFER,
+        walletName: 'Cash',
+        toWalletId: 'w2',
+        toWalletName: 'Mono',
+        toAmount: new Prisma.Decimal(2100),
+        toWalletCurrency: 'UAH',
+        categoryName: '',
+      });
+    });
+
     it('sums totalExpense and totalIncome separately from mixed rows', async () => {
       const { service, prisma } = buildService({
         prisma: {
@@ -399,12 +463,22 @@ describe('AnalyticsService', () => {
 
       expect(prisma.expense.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ walletId: { in: ['w1', 'w2'] } }),
+          where: expect.objectContaining({
+            OR: [
+              { walletId: { in: ['w1', 'w2'] } },
+              { toWalletId: { in: ['w1', 'w2'] } },
+            ],
+          }),
         }),
       );
       expect(prisma.expense.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ walletId: { in: ['w1', 'w2'] } }),
+          where: expect.objectContaining({
+            OR: [
+              { walletId: { in: ['w1', 'w2'] } },
+              { toWalletId: { in: ['w1', 'w2'] } },
+            ],
+          }),
         }),
       );
     });
@@ -655,10 +729,10 @@ describe('AnalyticsService', () => {
 
       const lines = csv.split('\r\n');
       expect(lines[0]).toBe(
-        '﻿Date,Type,Wallet,Category,Amount,Currency,AmountInPrimary,PrimaryCurrency,Note,CreatedBy',
+        '﻿Date,Type,Wallet,Category,Amount,Currency,AmountInPrimary,PrimaryCurrency,Note,CreatedBy,ToWallet,ToAmount,ToCurrency',
       );
       expect(lines[1]).toBe(
-        '2026-06-05,EXPENSE,Cash,Groceries,42.5,USD,39.1,EUR,Weekly shop,Olena',
+        '2026-06-05,EXPENSE,Cash,Groceries,42.5,USD,39.1,EUR,Weekly shop,Olena,,,',
       );
       expect(lines).toHaveLength(2);
     });

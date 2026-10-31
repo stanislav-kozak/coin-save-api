@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { Prisma, type Expense, type TransactionType } from '@prisma/client';
+import { Prisma, TransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrencyService } from '../currencies/currencies.service';
 import {
@@ -10,16 +10,19 @@ import {
 } from '../common/utils/time-zone';
 import { AppException } from '../common/exceptions/app.exception';
 import { ERROR_CODES } from '../common/constants/error-codes';
-
-const MAX_PAST_YEARS = 5;
-// Phones whose clock runs a little fast send "now" slightly in the future;
-// tolerate that instead of rejecting every just-made expense.
-const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
+import { parseOccurredAt } from '../common/utils/occurred-at';
+import type { EntryType } from '../common/constants/transaction-types';
+import {
+  toTransactionResponse,
+  transactionInclude,
+  type TransactionResponse,
+  type TransactionWithToWallet,
+} from './transaction-response';
 
 export interface CreateExpenseInput {
   walletId: string;
   categoryId?: string;
-  type: TransactionType;
+  type: EntryType;
   amount: number;
   occurredAt: string;
   note?: string;
@@ -53,8 +56,8 @@ export class ExpensesService {
     spaceId: string,
     createdById: string,
     input: CreateExpenseInput,
-  ): Promise<Expense> {
-    const occurredAt = this.parseAndValidateOccurredAt(input.occurredAt);
+  ): Promise<TransactionResponse> {
+    const occurredAt = parseOccurredAt(input.occurredAt);
     const wallet = await this.assertWalletInSpace(spaceId, input.walletId);
     if (input.categoryId) {
       await this.assertCategoryInSpace(spaceId, input.categoryId);
@@ -70,7 +73,7 @@ export class ExpensesService {
     ).toDecimalPlaces(8);
     const amountInPrimary = new Prisma.Decimal(input.amount).times(fxRate);
 
-    return this.prisma.expense.create({
+    const expense = await this.prisma.expense.create({
       data: {
         spaceId,
         walletId: input.walletId,
@@ -84,13 +87,15 @@ export class ExpensesService {
         occurredAt,
         createdById,
       },
+      include: transactionInclude,
     });
+    return toTransactionResponse(expense);
   }
 
-  listExpenses(
+  async listExpenses(
     spaceId: string,
     filter: ListExpensesFilter,
-  ): Promise<Expense[]> {
+  ): Promise<TransactionResponse[]> {
     // from/to are calendar days in the caller's time zone, both inclusive.
     const timeZone = filter.tz ?? DEFAULT_TIME_ZONE;
     const occurredAtRange =
@@ -115,28 +120,50 @@ export class ExpensesService {
           }
         : undefined;
 
-    return this.prisma.expense.findMany({
+    const expenses = await this.prisma.expense.findMany({
       where: {
         spaceId,
-        ...(filter.walletId ? { walletId: filter.walletId } : {}),
+        // A wallet's history includes transfers into it, not only out of it.
+        ...(filter.walletId
+          ? {
+              OR: [
+                { walletId: filter.walletId },
+                { toWalletId: filter.walletId },
+              ],
+            }
+          : {}),
         ...(filter.categoryId ? { categoryId: filter.categoryId } : {}),
         ...(filter.type ? { type: filter.type } : {}),
         ...(occurredAtRange ? { occurredAt: occurredAtRange } : {}),
       },
+      include: transactionInclude,
       orderBy: { occurredAt: 'desc' },
     });
+    return expenses.map(toTransactionResponse);
   }
 
-  getExpense(spaceId: string, expenseId: string): Promise<Expense> {
-    return this.findExpenseOrThrow(spaceId, expenseId);
+  async getExpense(
+    spaceId: string,
+    expenseId: string,
+  ): Promise<TransactionResponse> {
+    return toTransactionResponse(
+      await this.findExpenseOrThrow(spaceId, expenseId),
+    );
   }
 
   async updateExpense(
     spaceId: string,
     expenseId: string,
     input: UpdateExpenseInput,
-  ): Promise<Expense> {
+  ): Promise<TransactionResponse> {
     const existing = await this.findExpenseOrThrow(spaceId, expenseId);
+    if (existing.type === TransactionType.TRANSFER) {
+      throw new AppException(
+        ERROR_CODES.EXPENSE_IS_TRANSFER,
+        HttpStatus.CONFLICT,
+        'Transfers are edited via the transfers endpoint',
+      );
+    }
 
     if (input.categoryId) {
       await this.assertCategoryInSpace(spaceId, input.categoryId);
@@ -149,7 +176,7 @@ export class ExpensesService {
     }
 
     const occurredAt = input.occurredAt
-      ? this.parseAndValidateOccurredAt(input.occurredAt)
+      ? parseOccurredAt(input.occurredAt)
       : undefined;
 
     const needsFxRecompute =
@@ -175,7 +202,7 @@ export class ExpensesService {
       amountInPrimary = new Prisma.Decimal(effectiveAmount).times(fxRate);
     }
 
-    return this.prisma.expense.update({
+    const updated = await this.prisma.expense.update({
       where: { id: expenseId },
       data: {
         walletId: input.walletId,
@@ -187,41 +214,14 @@ export class ExpensesService {
         note: input.note,
         occurredAt,
       },
+      include: transactionInclude,
     });
+    return toTransactionResponse(updated);
   }
 
   async deleteExpense(spaceId: string, expenseId: string): Promise<void> {
     await this.findExpenseOrThrow(spaceId, expenseId);
     await this.prisma.expense.delete({ where: { id: expenseId } });
-  }
-
-  private parseAndValidateOccurredAt(occurredAt: string): Date {
-    const date = new Date(occurredAt);
-    if (Number.isNaN(date.getTime())) {
-      throw new AppException(
-        ERROR_CODES.INVALID_OCCURRED_AT,
-        HttpStatus.BAD_REQUEST,
-        'occurredAt is not a valid date',
-      );
-    }
-    const now = new Date();
-    if (date.getTime() > now.getTime() + MAX_CLOCK_SKEW_MS) {
-      throw new AppException(
-        ERROR_CODES.INVALID_OCCURRED_AT,
-        HttpStatus.BAD_REQUEST,
-        'occurredAt cannot be in the future',
-      );
-    }
-    const earliestAllowed = new Date(now);
-    earliestAllowed.setFullYear(earliestAllowed.getFullYear() - MAX_PAST_YEARS);
-    if (date.getTime() < earliestAllowed.getTime()) {
-      throw new AppException(
-        ERROR_CODES.INVALID_OCCURRED_AT,
-        HttpStatus.BAD_REQUEST,
-        `occurredAt cannot be more than ${MAX_PAST_YEARS} years in the past`,
-      );
-    }
-    return date;
   }
 
   private async assertWalletInSpace(
@@ -290,9 +290,10 @@ export class ExpensesService {
   private async findExpenseOrThrow(
     spaceId: string,
     expenseId: string,
-  ): Promise<Expense> {
+  ): Promise<TransactionWithToWallet> {
     const expense = await this.prisma.expense.findUnique({
       where: { id: expenseId },
+      include: transactionInclude,
     });
     if (!expense || expense.spaceId !== spaceId) {
       throw new AppException(

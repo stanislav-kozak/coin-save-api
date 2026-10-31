@@ -596,4 +596,167 @@ describe('Expenses flow (integration)', () => {
       .send({ currency: 'XYZ' })
       .expect(400);
   });
+
+  it('moves money between wallets with transfers: balances, history, analytics, edits, currency change', async () => {
+    // 1 EUR = 1.1 USD, for every date.
+    vi.stubGlobal(
+      'fetch',
+      mockFetch({ frankfurter: frankfurterOk({ USD: 1.1 }) }),
+    );
+
+    const agent = createCookieAgent(app);
+    const email = 'transfers@example.com';
+    const password = 'super-secret-1';
+    await agent.post('/api/auth/signup').send({ email, password }).expect(201);
+    const verifyToken = new URL(
+      capturedEmails.find((e) => e.to === email)!.vars.verifyUrl,
+    ).searchParams.get('token');
+    await agent
+      .post('/api/auth/verify-email')
+      .send({ token: verifyToken })
+      .expect(200);
+    await agent.post('/api/auth/login').send({ email, password }).expect(200);
+    const spaceId = (
+      await agent.post('/api/spaces').send({ name: 'Transfers' }).expect(201)
+    ).body.id as string;
+    const createWallet = async (name: string, currency: string, initial = 0) =>
+      (
+        await agent
+          .post(`/api/spaces/${spaceId}/wallets`)
+          .send({ name, currency, initialBalance: initial })
+          .expect(201)
+      ).body.id as string;
+    const card = await createWallet('Card', 'EUR', 1000);
+    const dollars = await createWallet('Dollars', 'USD');
+    const cash = await createWallet('Cash', 'EUR');
+    const balanceOf = async (walletId: string) =>
+      Number(
+        (
+          await agent
+            .get(`/api/spaces/${spaceId}/wallets/${walletId}`)
+            .expect(200)
+        ).body.balance,
+      );
+
+    const toDollars = await agent
+      .post(`/api/spaces/${spaceId}/transfers`)
+      .send({
+        fromWalletId: card,
+        toWalletId: dollars,
+        amount: 100,
+        occurredAt: '2026-06-10T00:00:00.000Z',
+      })
+      .expect(201);
+    expect(toDollars.body).toMatchObject({
+      type: 'TRANSFER',
+      walletId: card,
+      walletCurrency: 'EUR',
+      toWalletId: dollars,
+      toWalletName: 'Dollars',
+      toWalletCurrency: 'USD',
+      categoryId: null,
+    });
+    expect(Number(toDollars.body.toAmount)).toBeCloseTo(110, 4);
+
+    const mismatch = await agent
+      .post(`/api/spaces/${spaceId}/transfers`)
+      .send({
+        fromWalletId: card,
+        toWalletId: cash,
+        amount: 50,
+        toAmount: 49,
+        occurredAt: '2026-06-11T00:00:00.000Z',
+      })
+      .expect(400);
+    expect(mismatch.body.code).toBe('TRANSFER_AMOUNT_MISMATCH');
+    const sameWallet = await agent
+      .post(`/api/spaces/${spaceId}/transfers`)
+      .send({
+        fromWalletId: card,
+        toWalletId: card,
+        amount: 50,
+        occurredAt: '2026-06-11T00:00:00.000Z',
+      })
+      .expect(400);
+    expect(sameWallet.body.code).toBe('TRANSFER_SAME_WALLET');
+
+    const toCash = await agent
+      .post(`/api/spaces/${spaceId}/transfers`)
+      .send({
+        fromWalletId: card,
+        toWalletId: cash,
+        amount: 50,
+        occurredAt: '2026-06-11T00:00:00.000Z',
+      })
+      .expect(201);
+    expect(Number(toCash.body.toAmount)).toBe(50);
+
+    expect(await balanceOf(card)).toBeCloseTo(850, 4);
+    expect(await balanceOf(dollars)).toBeCloseTo(110, 4);
+    expect(await balanceOf(cash)).toBeCloseTo(50, 4);
+
+    // The destination wallet's history shows the transfer into it.
+    const dollarsHistory = await agent
+      .get(`/api/spaces/${spaceId}/expenses?walletId=${dollars}`)
+      .expect(200);
+    expect(dollarsHistory.body).toHaveLength(1);
+    expect(dollarsHistory.body[0]).toMatchObject({
+      id: toDollars.body.id,
+      toWalletName: 'Dollars',
+    });
+
+    // Neither expense nor income: only listed.
+    const analytics = await agent
+      .get(`/api/spaces/${spaceId}/analytics?from=2026-06-01&to=2026-06-30`)
+      .expect(200);
+    expect(Number(analytics.body.totalExpense)).toBe(0);
+    expect(Number(analytics.body.totalIncome)).toBe(0);
+    expect(
+      (analytics.body.expenses as { type: string }[]).map((e) => e.type),
+    ).toEqual(['TRANSFER', 'TRANSFER']);
+
+    // Transfers are only made and edited through /transfers.
+    await agent
+      .post(`/api/spaces/${spaceId}/expenses`)
+      .send({
+        walletId: card,
+        type: 'TRANSFER',
+        amount: 5,
+        occurredAt: '2026-06-11T00:00:00.000Z',
+      })
+      .expect(400);
+    const viaExpenses = await agent
+      .patch(`/api/spaces/${spaceId}/expenses/${toDollars.body.id}`)
+      .send({ note: 'x' })
+      .expect(409);
+    expect(viaExpenses.body.code).toBe('EXPENSE_IS_TRANSFER');
+
+    const edited = await agent
+      .patch(`/api/spaces/${spaceId}/transfers/${toDollars.body.id}`)
+      .send({ amount: 200 })
+      .expect(200);
+    expect(Number(edited.body.toAmount)).toBeCloseTo(220, 4);
+    expect(await balanceOf(card)).toBeCloseTo(750, 4);
+    expect(await balanceOf(dollars)).toBeCloseTo(220, 4);
+
+    await agent
+      .delete(`/api/spaces/${spaceId}/transfers/${toCash.body.id}`)
+      .expect(204);
+    expect(await balanceOf(cash)).toBe(0);
+    const gone = await agent
+      .delete(`/api/spaces/${spaceId}/transfers/${toCash.body.id}`)
+      .expect(404);
+    expect(gone.body.code).toBe('TRANSFER_NOT_FOUND');
+
+    // The destination wallet changes currency: what it received converts too.
+    await agent
+      .patch(`/api/spaces/${spaceId}/wallets/${dollars}`)
+      .send({ currency: 'EUR' })
+      .expect(200);
+    expect(await balanceOf(dollars)).toBeCloseTo(200, 2);
+    const afterChange = await agent
+      .get(`/api/spaces/${spaceId}/expenses/${toDollars.body.id}`)
+      .expect(200);
+    expect(afterChange.body.toWalletCurrency).toBe('EUR');
+  });
 });

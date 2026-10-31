@@ -1,5 +1,5 @@
 import {
-  IsEnum,
+  IsIn,
   IsISO8601,
   IsNumber,
   IsOptional,
@@ -8,8 +8,12 @@ import {
   Max,
   MaxLength,
 } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
 import { ApiPositiveAmountProperty } from '../../common/decorators/api-property.decorator';
-import { TransactionType } from '@prisma/client';
+import {
+  ENTRY_TYPES,
+  type EntryType,
+} from '../../common/constants/transaction-types';
 
 export class CreateExpenseDto {
   @IsString()
@@ -19,8 +23,9 @@ export class CreateExpenseDto {
   @IsString()
   categoryId?: string;
 
-  @IsEnum(TransactionType)
-  type!: TransactionType;
+  @ApiProperty({ enum: ENTRY_TYPES, enumName: 'EntryType' })
+  @IsIn(ENTRY_TYPES)
+  type!: EntryType;
 
   @IsNumber({ maxDecimalPlaces: 4 })
   @ApiPositiveAmountProperty()

@@ -118,10 +118,11 @@ export class WalletsService {
     );
   }
 
-  // Converts everything denominated in the wallet's currency at today's
-  // rate, so the balance converts exactly (old balance x rate). Amounts in
-  // the space currency (amountInPrimary) are kept and fxRate is re-derived
-  // from them. One statement: atomic and a single round trip.
+  // Converts everything denominated in the wallet's currency (including
+  // what transfers brought into it) at today's rate, so the balance converts
+  // exactly (old balance x rate). Amounts in the space currency
+  // (amountInPrimary) are kept and fxRate is re-derived from them. One
+  // statement: atomic and a single round trip.
   private async changeCurrency(
     wallet: Wallet,
     input: UpdateWalletInput,
@@ -157,6 +158,13 @@ export class WalletsService {
             END,
             "updatedAt" = NOW()
         WHERE "walletId" = ${wallet.id}
+        RETURNING 1
+      ), t AS (
+        UPDATE "Expense"
+        SET "toAmount" = ROUND("toAmount" * ${rate}::numeric, 4),
+            "toWalletCurrency" = ${to},
+            "updatedAt" = NOW()
+        WHERE "toWalletId" = ${wallet.id}
         RETURNING 1
       ), r AS (
         UPDATE "RecurringTransaction"
@@ -238,11 +246,23 @@ export class WalletsService {
       return movements;
     }
 
-    const sums = await this.prisma.expense.groupBy({
-      by: ['walletId', 'type'],
-      where: { walletId: { in: walletIds } },
-      _sum: { amount: true },
-    });
+    // Money leaves a wallet as an expense or a transfer out (walletId side)
+    // and arrives as an income or a transfer in (toWalletId side, toAmount).
+    const [sums, transfersIn] = await Promise.all([
+      this.prisma.expense.groupBy({
+        by: ['walletId', 'type'],
+        where: { walletId: { in: walletIds } },
+        _sum: { amount: true },
+      }),
+      this.prisma.expense.groupBy({
+        by: ['toWalletId'],
+        where: {
+          type: TransactionType.TRANSFER,
+          toWalletId: { in: walletIds },
+        },
+        _sum: { toAmount: true },
+      }),
+    ]);
 
     for (const row of sums) {
       const current = movements.get(row.walletId) ?? new Prisma.Decimal(0);
@@ -250,6 +270,14 @@ export class WalletsService {
       const signed =
         row.type === TransactionType.INCOME ? amount : amount.negated();
       movements.set(row.walletId, current.plus(signed));
+    }
+    for (const row of transfersIn) {
+      const walletId = row.toWalletId!;
+      const current = movements.get(walletId) ?? new Prisma.Decimal(0);
+      movements.set(
+        walletId,
+        current.plus(row._sum.toAmount ?? new Prisma.Decimal(0)),
+      );
     }
 
     return movements;

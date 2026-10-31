@@ -98,10 +98,37 @@ export class AnalyticsExpenseItemDto {
   @ApiProperty()
   walletName!: string;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'TRANSFER only: destination wallet; null otherwise',
+  })
+  toWalletId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'TRANSFER only: destination wallet name',
+  })
+  toWalletName!: string | null;
+
+  @ApiDecimalProperty({
+    nullable: true,
+    description: 'TRANSFER only: amount received, in toWalletCurrency',
+  })
+  toAmount!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'TRANSFER only: destination wallet currency',
+  })
+  toWalletCurrency!: string | null;
+
   @ApiProperty({ type: String, nullable: true })
   categoryId!: string | null;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Empty for a TRANSFER' })
   categoryName!: string;
 
   @ApiProperty()
