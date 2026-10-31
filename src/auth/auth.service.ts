@@ -287,8 +287,8 @@ export class AuthService {
     await this.users.updatePassword(matched.userId, passwordHash);
 
     // A reset usually means the password may be compromised: sign out every
-    // device (existing access tokens still expire within 15 minutes) and void
-    // any other reset links that are still pending.
+    // device (existing access tokens still work until they expire, up to
+    // 3 days) and void any other reset links that are still pending.
     await this.tokens.revokeAllForUser(matched.userId);
     await this.prisma.passwordResetToken.updateMany({
       where: { userId: matched.userId, usedAt: null },

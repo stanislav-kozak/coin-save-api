@@ -10,6 +10,7 @@ import {
 import { AppModule } from '../../src/app.module';
 import { AppExceptionFilter } from '../../src/common/filters/app-exception.filter';
 import { MailService } from '../../src/mail/mail.service';
+import { PrismaService } from '../../src/prisma/prisma.service';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 
 describe('Auth flow (integration)', () => {
@@ -302,7 +303,7 @@ describe('Auth flow (integration)', () => {
     expect(duplicate.body.code).toBe('EMAIL_ALREADY_EXISTS');
   });
 
-  it('rejects reuse of an already-rotated refresh token', async () => {
+  it('keeps the session when a just-rotated refresh token comes back, and rejects reuse after the grace window', async () => {
     const email = 'reuse-test@example.com';
     const password = 'super-secret-1';
 
@@ -326,12 +327,30 @@ describe('Auth flow (integration)', () => {
     const originalCookies = loginRes.headers[
       'set-cookie'
     ] as unknown as string[];
+    const originalId = originalCookies
+      .find((c) => c.startsWith('refresh='))!
+      .slice('refresh='.length)
+      .split('.')[0];
 
     await request(app.getHttpServer())
       .post('/api/auth/refresh')
       .set('Cookie', originalCookies)
       .expect(200);
 
+    // The new cookie got lost (client timeout, tab closed): the old token
+    // still works for a short while instead of ending every session.
+    const retried = await request(app.getHttpServer())
+      .post('/api/auth/refresh')
+      .set('Cookie', originalCookies)
+      .expect(200);
+    const retriedCookies = retried.headers['set-cookie'] as unknown as string[];
+    expect(retriedCookies.some((c) => c.startsWith('refresh='))).toBe(true);
+
+    // Past the grace window, the same token is treated as stolen.
+    await app.get(PrismaService).refreshToken.update({
+      where: { id: originalId },
+      data: { revokedAt: new Date(Date.now() - 5 * 60 * 1000) },
+    });
     const res = await request(app.getHttpServer())
       .post('/api/auth/refresh')
       .set('Cookie', originalCookies)
@@ -342,6 +361,11 @@ describe('Auth flow (integration)', () => {
     // app and /login with a dead session.
     const rejectedCookies = res.headers['set-cookie'] as unknown as string[];
     expect(rejectedCookies.some((c) => c.startsWith('session=;'))).toBe(true);
+    // ...and every session of the user is ended.
+    await request(app.getHttpServer())
+      .post('/api/auth/refresh')
+      .set('Cookie', retriedCookies)
+      .expect(401);
   });
 
   it('lets the signed-in user edit their name and language via PATCH /api/users/me', async () => {
