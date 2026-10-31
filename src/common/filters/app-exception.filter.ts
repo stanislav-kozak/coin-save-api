@@ -18,7 +18,8 @@ interface ErrorBody {
 
 // Errors from SMTP, Prisma etc. can echo addresses back; keep them out of logs.
 const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
-const redact = (text: string): string => text.replace(EMAIL_PATTERN, '[email]');
+export const redact = (text: string): string =>
+  text.replace(EMAIL_PATTERN, '[email]');
 
 @Catch()
 export class AppExceptionFilter implements ExceptionFilter {
