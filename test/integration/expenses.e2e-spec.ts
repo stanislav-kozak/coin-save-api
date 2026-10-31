@@ -11,6 +11,7 @@ import { AppModule } from '../../src/app.module';
 import { AppExceptionFilter } from '../../src/common/filters/app-exception.filter';
 import { CurrencyService } from '../../src/currencies/currencies.service';
 import { MailService } from '../../src/mail/mail.service';
+import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { createCookieAgent } from '../helpers/cookie-agent';
 import {
   failing,
@@ -74,6 +75,12 @@ describe('Expenses flow (integration)', () => {
   afterAll(async () => {
     await app.close();
     await container.stop();
+  });
+
+  // Each test signs up its own user: keep earlier tests' signups from
+  // tripping the per-IP auth rate limit (5/min).
+  beforeEach(() => {
+    app.get<ThrottlerStorageService>(ThrottlerStorage).storage.clear();
   });
 
   afterEach(() => {
