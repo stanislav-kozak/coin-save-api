@@ -42,15 +42,18 @@ model AuthAccount {
 }
 
 model RefreshToken {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String    @unique // argon2 hash of the token
-  expiresAt DateTime
-  revokedAt DateTime?
-  userAgent String?
-  ipAddress String?
-  createdAt DateTime  @default(now())
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String    @unique // argon2 hash of the token
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  // Set when this token was rotated (revokedAt is then the rotation time).
+  // A token revoked any other way (logout, password reset) has none.
+  replacedById String?
+  userAgent    String?
+  ipAddress    String?
+  createdAt    DateTime  @default(now())
 
   @@index([userId])
 }
