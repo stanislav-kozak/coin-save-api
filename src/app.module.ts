@@ -14,6 +14,7 @@ import { WalletsModule } from './wallets/wallets.module';
 import { CategoriesModule } from './categories/categories.module';
 import { CurrenciesModule } from './currencies/currencies.module';
 import { ExpensesModule } from './expenses/expenses.module';
+import { TransfersModule } from './transfers/transfers.module';
 import { RecurringModule } from './recurring/recurring.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -33,6 +34,7 @@ import { HealthModule } from './health/health.module';
     CategoriesModule,
     CurrenciesModule,
     ExpensesModule,
+    TransfersModule,
     RecurringModule,
     AnalyticsModule,
     NotificationsModule,

@@ -1,6 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { Prisma, TransactionType } from '@prisma/client';
 import { ExpensesService } from './expenses.service';
+import { transactionInclude } from './transaction-response';
 import { AppException } from '../common/exceptions/app.exception';
 import {
   buildPrismaMock,
@@ -90,6 +91,7 @@ describe('ExpensesService', () => {
           occurredAt: new Date('2026-06-10T00:00:00.000Z'),
           createdById: 'u1',
         },
+        include: transactionInclude,
       });
       const createdData = prisma.expense.create.mock.calls[0][0].data;
       expect((createdData.amountInPrimary as Prisma.Decimal).toNumber()).toBe(
@@ -269,6 +271,7 @@ describe('ExpensesService', () => {
           data: expect.objectContaining({
             occurredAt: new Date(occurredAt),
           }) as unknown,
+          include: transactionInclude,
         });
       }
     });
@@ -350,7 +353,8 @@ describe('ExpensesService', () => {
       expect(prisma.expense.findMany).toHaveBeenCalledWith({
         where: {
           spaceId: 's1',
-          walletId: 'w1',
+          // Transfers into the wallet belong to its history too.
+          OR: [{ walletId: 'w1' }, { toWalletId: 'w1' }],
           categoryId: 'c1',
           type: TransactionType.EXPENSE,
           occurredAt: {
@@ -358,6 +362,7 @@ describe('ExpensesService', () => {
             lte: new Date('2026-06-30T23:59:59.999Z'),
           },
         },
+        include: transactionInclude,
         orderBy: { occurredAt: 'desc' },
       });
     });
@@ -379,6 +384,7 @@ describe('ExpensesService', () => {
 
     it('reads from/to as Kyiv calendar days when no time zone is given', async () => {
       const { service, prisma } = buildService();
+      prisma.expense.findMany.mockResolvedValue([]);
 
       await service.listExpenses('s1', {
         from: '2026-10-01',
@@ -406,6 +412,7 @@ describe('ExpensesService', () => {
 
       expect(prisma.expense.findMany).toHaveBeenCalledWith({
         where: { spaceId: 's1' },
+        include: transactionInclude,
         orderBy: { occurredAt: 'desc' },
       });
     });
@@ -414,11 +421,15 @@ describe('ExpensesService', () => {
   describe('getExpense', () => {
     it('returns the expense when it belongs to the space', async () => {
       const { service, prisma } = buildService();
-      prisma.expense.findUnique.mockResolvedValue({ id: 'e1', spaceId: 's1' });
+      prisma.expense.findUnique.mockResolvedValue({
+        id: 'e1',
+        spaceId: 's1',
+        toWallet: null,
+      });
 
       const result = await service.getExpense('s1', 'e1');
 
-      expect(result).toEqual({ id: 'e1', spaceId: 's1' });
+      expect(result).toEqual({ id: 'e1', spaceId: 's1', toWalletName: null });
     });
 
     it('throws EXPENSE_NOT_FOUND when the expense belongs to a different space', async () => {
@@ -490,7 +501,26 @@ describe('ExpensesService', () => {
           note: 'New note',
           occurredAt: undefined,
         },
+        include: transactionInclude,
       });
+    });
+
+    it('refuses to edit a transfer: those go through the transfers endpoint', async () => {
+      const { service, prisma } = buildService();
+      prisma.expense.findUnique.mockResolvedValue({
+        ...baseExpense,
+        type: TransactionType.TRANSFER,
+        toWalletId: 'w2',
+      });
+
+      await expect(
+        service.updateExpense('s1', 'e1', { note: 'x' }),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'EXPENSE_IS_TRANSFER',
+        }) as unknown,
+      });
+      expect(prisma.expense.update).not.toHaveBeenCalled();
     });
 
     it('recomputes fxRate/amountInPrimary when amount changes', async () => {

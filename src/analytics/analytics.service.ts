@@ -18,6 +18,7 @@ export const UNCATEGORIZED_NAME = 'Uncategorized';
 
 export const expenseWithJoinsInclude = {
   wallet: { select: { name: true } },
+  toWallet: { select: { name: true } },
   category: { select: { name: true } },
   createdBy: { select: { name: true, email: true } },
 } satisfies Prisma.ExpenseInclude;
@@ -52,6 +53,10 @@ export interface AnalyticsExpenseItem {
   occurredAt: Date;
   walletId: string;
   walletName: string;
+  toWalletId: string | null;
+  toWalletName: string | null;
+  toAmount: Prisma.Decimal | null;
+  toWalletCurrency: string | null;
   categoryId: string | null;
   categoryName: string;
   createdById: string;
@@ -103,8 +108,15 @@ export class AnalyticsService {
     const period = this.parsePeriod(filter.from, filter.to, filter.tz);
     const { fromStart, toEnd } = period;
     const space = await this.findSpaceOrThrow(spaceId);
+    // Transfers into the selected wallets count as theirs too (they only
+    // show in the list: totals ignore transfers).
     const walletFilter: Prisma.ExpenseWhereInput = filter.walletIds?.length
-      ? { walletId: { in: filter.walletIds } }
+      ? {
+          OR: [
+            { walletId: { in: filter.walletIds } },
+            { toWalletId: { in: filter.walletIds } },
+          ],
+        }
       : {};
 
     const [categories, currentExpenses, previousPeriodSums] = await Promise.all(
@@ -177,6 +189,9 @@ export class AnalyticsService {
       'PrimaryCurrency',
       'Note',
       'CreatedBy',
+      'ToWallet',
+      'ToAmount',
+      'ToCurrency',
     ];
     const rows = expenses.map((expense) => {
       const item = this.toExpenseItem(expense);
@@ -191,6 +206,9 @@ export class AnalyticsService {
         space.primaryCurrency,
         item.note ?? '',
         item.createdByName,
+        item.toWalletName ?? '',
+        item.toAmount?.toString() ?? '',
+        item.toWalletCurrency ?? '',
       ];
     });
 
@@ -275,7 +293,7 @@ export class AnalyticsService {
       const sum = row._sum.amountInPrimary ?? new Prisma.Decimal(0);
       if (row.type === TransactionType.EXPENSE) {
         expense = sum;
-      } else {
+      } else if (row.type === TransactionType.INCOME) {
         income = sum;
       }
     }
@@ -417,7 +435,7 @@ export class AnalyticsService {
       };
       if (expense.type === TransactionType.EXPENSE) {
         current.expense = current.expense.plus(expense.amountInPrimary);
-      } else {
+      } else if (expense.type === TransactionType.INCOME) {
         current.income = current.income.plus(expense.amountInPrimary);
       }
       sumsByDate.set(dateKey, current);
@@ -462,8 +480,16 @@ export class AnalyticsService {
       occurredAt: expense.occurredAt,
       walletId: expense.walletId,
       walletName: expense.wallet.name,
+      toWalletId: expense.toWalletId,
+      toWalletName: expense.toWallet?.name ?? null,
+      toAmount: expense.toAmount,
+      toWalletCurrency: expense.toWalletCurrency,
       categoryId: expense.categoryId,
-      categoryName: expense.category?.name ?? UNCATEGORIZED_NAME,
+      // A transfer is not "uncategorized": it has no category at all.
+      categoryName:
+        expense.type === TransactionType.TRANSFER
+          ? ''
+          : (expense.category?.name ?? UNCATEGORIZED_NAME),
       createdById: expense.createdById,
       createdByName: expense.createdBy.name ?? expense.createdBy.email,
     };

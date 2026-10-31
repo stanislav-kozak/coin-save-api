@@ -1,5 +1,7 @@
+import { ApiProperty } from '@nestjs/swagger';
 import {
   IsEnum,
+  IsIn,
   IsISO8601,
   IsInt,
   IsNumber,
@@ -12,7 +14,11 @@ import {
   MinLength,
 } from 'class-validator';
 import { ApiPositiveAmountProperty } from '../../common/decorators/api-property.decorator';
-import { RecurringFrequency, TransactionType } from '@prisma/client';
+import { RecurringFrequency } from '@prisma/client';
+import {
+  ENTRY_TYPES,
+  type EntryType,
+} from '../../common/constants/transaction-types';
 
 export class CreateRecurringTransactionDto {
   @IsString()
@@ -22,8 +28,9 @@ export class CreateRecurringTransactionDto {
   @IsString()
   categoryId?: string;
 
-  @IsEnum(TransactionType)
-  type!: TransactionType;
+  @ApiProperty({ enum: ENTRY_TYPES, enumName: 'EntryType' })
+  @IsIn(ENTRY_TYPES)
+  type!: EntryType;
 
   @IsNumber({ maxDecimalPlaces: 4 })
   @ApiPositiveAmountProperty()
