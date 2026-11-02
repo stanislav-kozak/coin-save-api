@@ -2,15 +2,17 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   IsIn,
   IsNumber,
-  IsOptional,
   IsString,
-  Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
 } from 'class-validator';
 import { SUPPORTED_CURRENCIES } from '../../common/constants/currencies';
+import {
+  ColorProperty,
+  IconProperty,
+} from '../../common/decorators/appearance.decorator';
 
 export class CreateWalletDto {
   @IsString()
@@ -21,15 +23,10 @@ export class CreateWalletDto {
   @IsIn(SUPPORTED_CURRENCIES)
   currency!: string;
 
-  @IsOptional()
-  @IsString()
+  @IconProperty()
   icon?: string;
 
-  @IsOptional()
-  @IsString()
-  @Matches(/^#[0-9A-Fa-f]{6}$/, {
-    message: 'color must be a 6-digit hex code, e.g. #F97350',
-  })
+  @ColorProperty()
   color?: string;
 
   // Explicit: the swagger plugin silently drops properties whose validators

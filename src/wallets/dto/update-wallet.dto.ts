@@ -4,7 +4,6 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  Matches,
   Max,
   MaxLength,
   Min,
@@ -12,6 +11,10 @@ import {
 } from 'class-validator';
 import { SUPPORTED_CURRENCIES } from '../../common/constants/currencies';
 import { ApiCurrencyProperty } from '../../common/decorators/api-property.decorator';
+import {
+  ColorProperty,
+  IconProperty,
+} from '../../common/decorators/appearance.decorator';
 
 export class UpdateWalletDto {
   @IsOptional()
@@ -20,16 +23,11 @@ export class UpdateWalletDto {
   @MaxLength(100)
   name?: string;
 
-  @IsOptional()
-  @IsString()
-  icon?: string;
+  @IconProperty({ resettable: true })
+  icon?: string | null;
 
-  @IsOptional()
-  @IsString()
-  @Matches(/^#[0-9A-Fa-f]{6}$/, {
-    message: 'color must be a 6-digit hex code, e.g. #F97350',
-  })
-  color?: string;
+  @ColorProperty({ resettable: true })
+  color?: string | null;
 
   // Explicit: the swagger plugin silently drops properties whose validators
   // take a negative literal (@Min(-1_000_000_000)).

@@ -284,5 +284,50 @@ describe('WalletsService', () => {
       expect($queryRaw).toHaveBeenCalledTimes(1);
       expect(result.currency).toBe('PLN');
     });
+
+    it('can reset the icon to the default (null) in the same request', async () => {
+      const { service, $queryRaw } = buildService({
+        getRate: vi.fn().mockResolvedValue(new Prisma.Decimal('3.9')),
+        prisma: {
+          wallet: {
+            findUnique: vi
+              .fn()
+              .mockResolvedValue({ ...baseWallet, currency: 'USD' }),
+          },
+        },
+      });
+
+      await service.updateWallet('s1', 'w1', { currency: 'PLN', icon: null });
+
+      // Tagged-template values: for icon "is it absent?" = false and the new
+      // value null (reset); color is absent (true) and keeps its value.
+      const sql = ($queryRaw.mock.calls[0][0] as string[]).join('?');
+      const values = $queryRaw.mock.calls[0].slice(1) as unknown[];
+      const at = (column: string) =>
+        sql.slice(0, sql.indexOf(`"${column}" = CASE`)).split('?').length - 1;
+      expect(values.slice(at('icon'), at('icon') + 2)).toEqual([false, null]);
+      expect(values[at('color')]).toBe(true);
+    });
+  });
+
+  it('resets icon and color to the default with null, keeps them when absent', async () => {
+    const { service, prisma } = buildService({
+      prisma: {
+        wallet: {
+          findUnique: vi.fn().mockResolvedValue(baseWallet),
+          update: vi.fn().mockResolvedValue(baseWallet),
+        },
+      },
+    });
+
+    await service.updateWallet('s1', 'w1', { icon: null });
+
+    expect(prisma.wallet.update).toHaveBeenCalledWith({
+      where: { id: 'w1' },
+      data: expect.objectContaining({
+        icon: null,
+        color: undefined,
+      }) as unknown,
+    });
   });
 });

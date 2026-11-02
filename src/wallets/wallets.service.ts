@@ -29,8 +29,8 @@ export interface CreateWalletInput {
 
 export interface UpdateWalletInput {
   name?: string;
-  icon?: string;
-  color?: string;
+  icon?: string | null;
+  color?: string | null;
   initialBalance?: number;
   currency?: string;
 }
@@ -178,8 +178,10 @@ export class WalletsService {
       SET "currency" = ${to},
           "initialBalance" = ROUND("initialBalance" * ${rate}::numeric, 4),
           "name" = COALESCE(${input.name ?? null}::text, "name"),
-          "icon" = COALESCE(${input.icon ?? null}::text, "icon"),
-          "color" = COALESCE(${input.color ?? null}::text, "color"),
+          "icon" = CASE WHEN ${input.icon === undefined}::boolean THEN "icon"
+                        ELSE ${input.icon ?? null}::text END,
+          "color" = CASE WHEN ${input.color === undefined}::boolean THEN "color"
+                         ELSE ${input.color ?? null}::text END,
           "updatedAt" = NOW()
       WHERE "id" = ${wallet.id}
       RETURNING "id"`;

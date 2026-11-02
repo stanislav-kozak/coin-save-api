@@ -16,8 +16,8 @@ export interface CreateCategoryInput {
 
 export interface UpdateCategoryInput {
   name?: string;
-  icon?: string;
-  color?: string;
+  icon?: string | null;
+  color?: string | null;
   monthlyLimit?: number | null;
   currency?: string | null;
 }
