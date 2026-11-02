@@ -281,7 +281,7 @@ describe('Analytics flow (integration)', () => {
     expect(csvRes.text.charCodeAt(0)).toBe(0xfeff); // UTF-8 BOM
     const csvLines = csvRes.text.replace(/^\ufeff/, '').split('\r\n');
     expect(csvLines[0]).toBe(
-      'Date,Type,Wallet,Category,Amount,Currency,AmountInPrimary,PrimaryCurrency,Note,CreatedBy',
+      'Date,Type,Wallet,Category,Amount,Currency,AmountInPrimary,PrimaryCurrency,Note,CreatedBy,ToWallet,ToAmount,ToCurrency',
     );
     expect(csvLines).toHaveLength(5); // header + 4 in-period rows
     const rentRow = csvLines.find((line) => line.includes('Rent share'));

@@ -96,7 +96,12 @@ export class ExpensesController {
     'WALLET_NOT_FOUND',
     'CATEGORY_NOT_FOUND',
   )
-  @ApiErrorResponse(HttpStatus.CONFLICT, 'WALLET_ARCHIVED', 'CATEGORY_ARCHIVED')
+  @ApiErrorResponse(
+    HttpStatus.CONFLICT,
+    'WALLET_ARCHIVED',
+    'CATEGORY_ARCHIVED',
+    'EXPENSE_IS_TRANSFER',
+  )
   @ApiErrorResponse(HttpStatus.SERVICE_UNAVAILABLE, 'CURRENCY_API_UNAVAILABLE')
   @ApiOkResponse({ type: ExpenseResponseDto })
   async update(

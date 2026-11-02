@@ -77,18 +77,21 @@ describe('WalletsService', () => {
       prisma: {
         wallet: { findUnique: vi.fn().mockResolvedValue(baseWallet) },
         expense: {
-          groupBy: vi.fn().mockResolvedValue([
-            {
-              walletId: 'w1',
-              type: TransactionType.INCOME,
-              _sum: { amount: new Prisma.Decimal(200) },
-            },
-            {
-              walletId: 'w1',
-              type: TransactionType.EXPENSE,
-              _sum: { amount: new Prisma.Decimal(150) },
-            },
-          ]),
+          groupBy: vi
+            .fn()
+            .mockResolvedValueOnce([
+              {
+                walletId: 'w1',
+                type: TransactionType.INCOME,
+                _sum: { amount: new Prisma.Decimal(200) },
+              },
+              {
+                walletId: 'w1',
+                type: TransactionType.EXPENSE,
+                _sum: { amount: new Prisma.Decimal(150) },
+              },
+            ])
+            .mockResolvedValueOnce([]),
         },
       },
     });
@@ -96,6 +99,41 @@ describe('WalletsService', () => {
     const result = await service.getWallet('s1', 'w1');
 
     expect(result.balance.toNumber()).toBe(1050);
+  });
+
+  it('subtracts transfers out (amount) and adds transfers in (toAmount)', async () => {
+    const { service, prisma } = buildService({
+      prisma: {
+        wallet: { findUnique: vi.fn().mockResolvedValue(baseWallet) },
+        expense: {
+          groupBy: vi
+            .fn()
+            .mockResolvedValueOnce([
+              {
+                walletId: 'w1',
+                type: TransactionType.TRANSFER,
+                _sum: { amount: new Prisma.Decimal(300) },
+              },
+            ])
+            .mockResolvedValueOnce([
+              {
+                toWalletId: 'w1',
+                _sum: { toAmount: new Prisma.Decimal(80) },
+              },
+            ]),
+        },
+      },
+    });
+
+    const result = await service.getWallet('s1', 'w1');
+
+    // 1000 initial - 300 sent + 80 received
+    expect(result.balance.toNumber()).toBe(780);
+    expect(prisma.expense.groupBy).toHaveBeenCalledWith({
+      by: ['toWalletId'],
+      where: { type: TransactionType.TRANSFER, toWalletId: { in: ['w1'] } },
+      _sum: { toAmount: true },
+    });
   });
 
   it('rejects getWallet when the wallet belongs to a different space', async () => {

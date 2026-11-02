@@ -40,7 +40,7 @@
 - Іменування файлів: kebab-case за конвенцією Nest — `*.controller.ts`, `*.service.ts`,
   `*.module.ts`, `*.guard.ts`, `*.dto.ts`; unit-тести — `*.spec.ts`.
 - Структура — модуль на фічу: `auth/`, `users/`, `spaces/`, `wallets/`, `categories/`,
-  `expenses/`, `recurring/`, `analytics/`, `currencies/`, `notifications/`, `events/`,
+  `expenses/`, `transfers/`, `recurring/`, `analytics/`, `currencies/`, `notifications/`, `events/`,
   `common/`, `prisma/`, `mail/`.
 - Грошові суми — виключно `Decimal(19, 4)`, ніколи `Float`.
 - Помилки API повертаються як `{ statusCode, code, message, details }` —
@@ -64,7 +64,9 @@
   reset пароля відкликає всі сесії, email без урахування регістру), users (`PATCH /api/users/me`:
   ім'я, мова), spaces (+ invitations, default categories мовою UI через `locale` у `POST /api/spaces`),
   wallets (зміна валюти з конвертацією за сьогоднішнім курсом), categories (власна валюта бюджету,
-  `monthlyLimit: null` знімає ліміт), expenses, recurring, analytics (+ CSV), currencies
+  `monthlyLimit: null` знімає ліміт), expenses, transfers (переказ між гаманцями — рядок
+  `Expense` з `type: TRANSFER` і `toWalletId`/`toAmount`; не витрата й не дохід, у totals не йде),
+  recurring, analytics (+ CSV), currencies
   (`GET /api/currencies/rate`), notifications, events (Socket.IO, авторизація з httpOnly access-cookie),
   health (`GET /api/health`), mail (MJML-шаблони `en`/`uk`, plain-text частини).
 - Глобально: префікс `/api`, `ValidationPipe({ whitelist, transform })`, `AppExceptionFilter`,

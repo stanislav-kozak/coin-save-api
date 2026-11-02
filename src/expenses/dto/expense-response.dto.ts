@@ -18,7 +18,13 @@ export class ExpenseResponseDto {
   @ApiProperty({ type: String, nullable: true })
   categoryId!: string | null;
 
-  @ApiProperty({ enum: TransactionType, enumName: 'TransactionType' })
+  @ApiProperty({
+    enum: TransactionType,
+    enumName: 'TransactionType',
+    description:
+      'TRANSFER moves money between two wallets: not an expense or income, ' +
+      'excluded from totals, categories and budgets',
+  })
   type!: TransactionType;
 
   @ApiDecimalProperty({ description: 'In walletCurrency' })
@@ -32,6 +38,34 @@ export class ExpenseResponseDto {
 
   @ApiDecimalProperty({ description: 'Exchange rate used for conversion' })
   fxRate!: string;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'TRANSFER only: destination wallet (walletId is the source); null otherwise',
+  })
+  toWalletId!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'TRANSFER only: destination wallet name (even if archived)',
+  })
+  toWalletName!: string | null;
+
+  @ApiDecimalProperty({
+    nullable: true,
+    description: 'TRANSFER only: amount received, in toWalletCurrency',
+  })
+  toAmount!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'TRANSFER only: destination wallet currency (snapshot)',
+  })
+  toWalletCurrency!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
   note!: string | null;
