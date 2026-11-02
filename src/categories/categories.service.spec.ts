@@ -87,6 +87,25 @@ describe('CategoriesService', () => {
     }
   });
 
+  it('resets icon and color to the default with null', async () => {
+    const { service, prisma } = buildService({
+      prisma: {
+        category: {
+          findUnique: vi
+            .fn()
+            .mockResolvedValue({ id: 'c1', spaceId: 's1', name: 'Food' }),
+        },
+      },
+    });
+
+    await service.updateCategory('s1', 'c1', { icon: null, color: null });
+
+    expect(prisma.category.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: expect.objectContaining({ icon: null, color: null }) as unknown,
+    });
+  });
+
   it('rejects renaming a category to a name used by a different category', async () => {
     const { service, prisma } = buildService({
       prisma: {

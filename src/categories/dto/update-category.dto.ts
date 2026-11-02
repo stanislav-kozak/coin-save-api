@@ -4,7 +4,6 @@ import {
   IsOptional,
   IsPositive,
   IsString,
-  Matches,
   Max,
   MaxLength,
   MinLength,
@@ -14,6 +13,10 @@ import {
   ApiCurrencyProperty,
 } from '../../common/decorators/api-property.decorator';
 import { SUPPORTED_CURRENCIES } from '../../common/constants/currencies';
+import {
+  ColorProperty,
+  IconProperty,
+} from '../../common/decorators/appearance.decorator';
 
 export class UpdateCategoryDto {
   @IsOptional()
@@ -22,16 +25,11 @@ export class UpdateCategoryDto {
   @MaxLength(100)
   name?: string;
 
-  @IsOptional()
-  @IsString()
-  icon?: string;
+  @IconProperty({ resettable: true })
+  icon?: string | null;
 
-  @IsOptional()
-  @IsString()
-  @Matches(/^#[0-9A-Fa-f]{6}$/, {
-    message: 'color must be a 6-digit hex code, e.g. #F97350',
-  })
-  color?: string;
+  @ColorProperty({ resettable: true })
+  color?: string | null;
 
   // Absent: unchanged. null: removes the limit (IsOptional skips the number
   // checks for null). A number: sets it.

@@ -144,6 +144,38 @@ describe('Wallets flow (integration)', () => {
     expect(updateRes.body.name).toBe('Renamed');
     expect(Number(updateRes.body.balance)).toBe(0);
 
+    // Icon and color: set, then reset to the default with null.
+    const styled = await agent
+      .patch(`/api/spaces/${spaceId}/wallets/${walletId}`)
+      .send({ icon: '💳', color: '#F97350' })
+      .expect(200);
+    expect(styled.body).toMatchObject({
+      icon: '💳',
+      color: '#F97350',
+    });
+    const reset = await agent
+      .patch(`/api/spaces/${spaceId}/wallets/${walletId}`)
+      .send({ icon: null, color: null })
+      .expect(200);
+    expect(reset.body).toMatchObject({ icon: null, color: null });
+    expect(reset.body.name).toBe('Renamed');
+    for (const invalid of [{ icon: 'x'.repeat(51) }, { color: 'red' }]) {
+      const res = await agent
+        .patch(`/api/spaces/${spaceId}/wallets/${walletId}`)
+        .send(invalid)
+        .expect(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+    }
+    await agent
+      .post(`/api/spaces/${spaceId}/wallets`)
+      .send({
+        name: 'Long icon',
+        currency: 'PLN',
+        initialBalance: 0,
+        icon: 'x'.repeat(51),
+      })
+      .expect(400);
+
     await agent
       .patch(`/api/spaces/${spaceId}/wallets/${walletId}/archive`)
       .expect(200);
